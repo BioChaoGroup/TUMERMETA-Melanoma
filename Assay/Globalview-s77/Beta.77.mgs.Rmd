@@ -1,0 +1,314 @@
+---
+title: "beta-diversity"
+output:
+  html_notebook:
+    code_fold: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(ggpubr)
+library(dplyr)
+library(ape)
+library(vegan)
+library(RColorBrewer)
+library(patchwork)
+source("D:/2_work/myGit/TUMORMETA/Assay/common.R")
+do.write<-F
+
+load("../../Result/01.Profile/phe1.RData")
+load("../../Result/01.Profile/relDaysgroups.RData")
+```
+
+
+# mgs
+```{r}
+mgs <- read.table("../../Result/02.gene2MGS/IGC.mgs.79.abundance.profile.txt", sep = "\t", row.names = 1, header = T)
+mgs <- mgs[rowSums(mgs)!=0,]
+# trans to relative aboundance
+mgs <- mgs/1000000  # total gene aboundance is 1000000
+
+#phenotype
+#phe<-read.table("../sampleInfo/sample information.txt",header = T, sep = "\t" ))
+phe <- phe.210701%>%filter(sample_order=="1"|sample_order=="-")#%>%filter(Fecal.sample.name%in%fecn.w50) # 剔除样本
+
+phe$Sample.collection.time <-  as.Date(phe$Sample.collection.time, format = "%Y/%m/%d")
+phe$Antibiotic <- ifelse(phe$Antibiotic.use=="No","No","Yes")
+```
+
+
+```{r}
+# bray curitis
+mgs.bray.dist<-as.matrix(vegdist(t(mgs))) #默认即为bray-curtis距离,bray curtis在微生物多样性研究中最为常用
+mgs.euclidean.dist <-as.matrix(vegdist(t(mgs),"euclidean",binary=TRUE))#euclidean距离,即欧式距离
+#PermFun(mgs.euclidean.dist, phe[,c(3,6,9,10,11,12,13,18,19)], 5)
+
+
+if(do.write){
+  write.csv(mgs.bray.dist,"../Result/01.Profile/mgs_beta.matrix.xls")
+}
+
+if(do.write){
+  write.csv(mgs.euclidean.dist,"../Result/01.Profile/mgs_beta_ed.matrix.xls")
+}
+
+g10.bray.df <- reshapeDist(mgs.bray.dist,phe,"Fecal.sample.name","Drug_type","BE2")
+colnames(g10.bray.df)[1:2] <- c("Drug_type","BE2")
+
+g5.bray.df <- reshapeDist(mgs.bray.dist,phe,"Fecal.sample.name","Group","BE2")
+colnames(g5.bray.df)[1:2] <- c("Group","BE2")
+
+g3.bray.df <- reshapeDist(mgs.bray.dist,phe,"Fecal.sample.name","Treatment_type","BE2")
+colnames(g3.bray.df)[1:2] <- c("Treatment_type","BE2")
+
+```
+
+
+### 多次用药一致 + 多次用药不一致的病人(共52个)
+```{r}
+p12 <- phe.210701%>%filter(sample_order=="1"|sample_order=="2")
+c12 <- p12%>%filter(Patient.ID%in%diff2sam) # 不同疗法
+s12 <- p12[-which(p12$Patient.ID%in%c12$Patient.ID),] # 相同疗法
+
+c12.bray.dist <- mgs.bray.dist[c12$Fecal.sample.name, c12$Fecal.sample.name]
+s12.bray.dist <- mgs.bray.dist[s12$Fecal.sample.name, s12$Fecal.sample.name]
+
+
+rm(c122)
+for (i in seq(1,nrow(c12.bray.dist),2)){
+  tmpd <- data.frame(ID1=as.character(c12$Fecal.sample.name[i]),ID2=as.character(c12$Fecal.sample.name[i+1]), dist=as.numeric(c12.bray.dist[i,i+1]))
+  if(exists("c122")){
+    c122 <- rbind(c122, tmpd)
+  }else{
+    c122 <- tmpd
+  }
+}
+c122$group <- "same subject(diff treatment)"
+
+
+rm(s122)
+for (i in seq(1,nrow(s12.bray.dist),2)){
+  tmpd <- data.frame(ID1=as.character(s12$Fecal.sample.name[i]), ID2=as.character(s12$Fecal.sample.name[i+1]), dist=as.numeric(s12.bray.dist[i,i+1]))
+  if(exists("s122")){
+    s122 <- rbind(s122, tmpd)
+  }else{
+    s122 <- tmpd
+  }
+}
+s122$group <- "same subject(same treatment)"
+
+
+bray.dat <- rbind(c122,s122)
+bray.dat$dist <- as.numeric(bray.dat$dist)
+
+p1 <- ggplot(bray.dat, aes(x=group, y=dist,fill=group))+geom_boxplot()+theme_classic()+ stat_compare_means(label = "p.format",method = "wilcox.test",size=3)+
+  labs(title="", x="", y="distance(bray curitis)")+theme_classic()
+p1
+
+if(do.write){
+  ggsave(p1,width = 7, height = 4, filename = "../../Result/04.Globalview/2.Beta/beta.bray.diff.same.boxplot.pdf")
+}
+```
+
+
+### 大组间比较
+```{r}
+load("../../Result/04.Globalview/g2g.compare.RData")
+pg1 <- ggplot(g5.bray.df, aes(x=Group, y=dist, fill = Group))+ 
+  geom_boxplot()+theme_classic() + 
+  theme() +
+  labs(title="MGS | Beta diversity(bray)", x="", y="distance")+ 
+  stat_compare_means(comparisons=compare_g5,label = "p.signif",method = "wilcox.test",size=3)
+  #stat_compare_means(label="p.format")
+
+
+pb1 <- ggplot(g5.bray.df, aes(x=Group, y=dist, fill=BE2))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme(legend.direction = "horizontal",legend.position=c(0.7,0.2)) +
+  labs(title="MGS | Beta diversity(bray)", x="", y="distance")+ 
+  stat_compare_means(label="p.format")
+pg1+pb1
+
+if(do.write){
+  ggsave(pb1, filename = "../../Result/04.Globalview/2.Beta/beta.bray.g5.BE2.boxplot.pdf")
+}
+
+```
+
+
+### 亚组(R：NR)间比较
+```{r}
+pg2 <- ggplot(g3.bray.df, aes(x=Treatment_type, y=dist,fill=Treatment_type))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme() +
+  labs(title="Beta diversity(bray)", x="", y="distance")+ 
+  stat_compare_means(comparisons=compare_g3,label = "p.format",method = "wilcox.test",size=3)
+  #stat_compare_means(label="p.format")
+
+
+pb2 <- ggplot(g3.bray.df, aes(x=Treatment_type, y=dist, fill=BE2))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme(legend.direction = "horizontal",legend.position=c(0.7,0.2)) +
+  labs(title="Beta diversity(bray)", x="", y="distance")+ 
+  stat_compare_means(label="p.format")
+pg2+pb2
+
+if(do.write){
+  ggsave(pb2, filename = "../Result/04.Globalview/2.Beta/beta.bray.g3.BE2.boxplot.pdf")
+}
+
+pg3 <- ggplot(g10.bray.df, aes(x=Drug_type, y=dist, fill=Drug_type))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme(axis.text.x = element_text(angle = 15)) +
+  labs(title="MGS | Beta diversity(bray)", x="", y="distance")+ 
+  stat_compare_means(comparisons=compare_g10,label = "p.format",method = "wilcox.test",size=3)
+  stat_compare_means(label="p.format")
+
+pb3 <- ggplot(g10.bray.df, aes(x=Drug_type, y=dist, fill=BE2))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme(legend.direction = "horizontal",legend.position=c(0.7,0.2),axis.text.x = element_text(angle = 15)) +
+  labs(title="MGS | Beta diversity(bray)", x="", y="distance")+ 
+  stat_compare_means(label="p.format")
+
+pg3+pb3
+
+if(do.write){
+   ggsave(pb2, filename = "../../Result/04.Globalview/2.Beta/beta.bray.g10.BE2.boxplot.pdf")
+}
+
+```
+
+# pcoa
+```{r}
+#PCoA
+
+pcoa_bray <- pcoa(mgs.bray.dist)
+pcoa_data <- data.frame(pcoa_bray$vectors[,1:2])
+colnames(pcoa_data) <- c("PC1", "PC2")
+eig <- pcoa_bray$value[,1]
+pc1 <- eig[1]/sum(eig)*100
+pc2 <- eig[2]/sum(eig)*100
+pc1 <- paste0("PC1(",round(pc1,2),"%)")
+pc2 <- paste0("PC2(",round(pc2,2),"%)")
+
+### merge data frame
+rownames(phe) <- phe$Fecal.sample.name
+pcoa_data<-merge(pcoa_data, phe, by = "row.names")
+
+ggplot(pcoa_data,aes(x=PC1,y=PC2,color=Antibiotic)) + geom_point() + stat_ellipse(aes(color=Antibiotic)) + xlab(pc1)+ylab(pc2) 
+ggplot(pcoa_data,aes(x=PC1,y=PC2,color=Native.place)) + geom_point() + stat_ellipse(aes(color=Native.place)) + xlab(pc1)+ylab(pc2) 
+
+ggplot(pcoa_data,aes(x=PC1,y=PC2,color=BE2)) + geom_point() + stat_ellipse(aes(color=BE2)) + xlab(pc1)+ylab(pc2) 
+
+
+ggplot(pcoa_data,aes(x=PC1,y=PC2,color=Group)) + geom_point() + stat_ellipse(aes(color=Group)) + xlab(pc1)+ylab(pc2) 
+ggplot(pcoa_data,aes(x=PC1,y=PC2,color=Treatment_type)) + geom_point() + stat_ellipse(aes(color=Treatment_type)) + xlab(pc1)+ylab(pc2) 
+ggplot(pcoa_data,aes(x=PC1,y=PC2,color=Drug_type)) + geom_point() + stat_ellipse(aes(color=Drug_type)) + xlab(pc1)+ylab(pc2) 
+
+
+ggplot(pcoa_data,aes(x=PC1,y=PC2,color=BE2)) + geom_point() + facet_wrap(~Drug_type,ncol=4) +
+  coord_fixed() + theme(legend.position = "top") + stat_ellipse(aes(color=BE2)) +
+  xlab(pc1)+ylab(pc2) 
+
+ggplot(pcoa_data,aes(x=PC1,y=PC2,color=BE2)) + geom_point() + facet_wrap(~Group,ncol=2) +
+  coord_fixed() + theme(legend.position = "top") + stat_ellipse(aes(color=BE2)) +
+  xlab(pc1)+ylab(pc2) 
+
+ggplot(pcoa_data,aes(x=PC1,y=PC2,color=BE2)) + geom_point() + facet_wrap(~Treatment_type,ncol=2) +
+  coord_fixed() + theme(legend.position = "top") + stat_ellipse(aes(color=BE2)) +
+  xlab(pc1)+ylab(pc2)
+```
+
+
+
+# 筛选多次用药一致 + 单次用药的病人
+```{r}
+tt <- as.data.frame(table(phe$Patient.ID, phe$Group))
+tt <- tt%>%filter(Freq == 0)  
+tt <- as.data.frame(table(tt$Var1,tt$Freq))
+tt <- tt%>%filter(Freq == 4)
+tt <- tt$Var1
+sel.phe <- phe%>%filter(Patient.ID %in% tt)
+
+```
+
+
+
+```{r}
+g10.bray.df <- reshapeDist(mgs.bray.dist,sel.phe,"Fecal.sample.name","Drug_type","BE2")
+colnames(g10.bray.df)[1:2] <- c("Drug_type","BE2")
+
+g5.bray.df <- reshapeDist(mgs.bray.dist,sel.phe,"Fecal.sample.name","Group","BE2")
+colnames(g5.bray.df)[1:2] <- c("Group","BE2")
+
+g3.bray.df <- reshapeDist(mgs.bray.dist,sel.phe,"Fecal.sample.name","Treatment_type","BE2")
+colnames(g3.bray.df)[1:2] <- c("Treatment_type","BE2")
+
+
+```
+
+
+### 大组间比较
+```{r}
+ggplot(g5.bray.df, aes(x=Group, y=dist, fill = Group))+ 
+  geom_boxplot()+theme_classic() + 
+  theme() +
+  labs(title="MGS | Beta diversity(bray)", x="", y="distance")+ 
+  stat_compare_means(comparisons=compare_g5,label = "p.format",method = "wilcox.test",size=3)
+  #stat_compare_means(label="p.format")
+
+
+ggplot(g3.bray.df, aes(x=Treatment_type, y=dist,fill=Treatment_type))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme() +
+  labs(title="Beta diversity(bray)", x="", y="distance")+ 
+  stat_compare_means(comparisons=compare_g3,label = "p.format",method = "wilcox.test",size=3)
+  #stat_compare_means(label="p.format")
+
+
+
+ggplot(g10.bray.df, aes(x=Drug_type, y=dist, fill=Drug_type))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme(axis.text.x = element_text(angle = 15)) +
+  labs(title="MGS | Beta diversity(bray)", x="", y="distance")+ 
+  stat_compare_means(comparisons=compare_g10,label = "p.format",method = "wilcox.test",size=3)
+  #stat_compare_means(label="p.format")
+
+```
+
+
+
+```{r}
+pa1 <- ggplot(g5.bray.df, aes(x=Group, y=dist, fill=BE2))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme(legend.direction = "horizontal",legend.position=c(0.7,0.2)) +
+  labs(title="Beta diversity(bray)", x="", y="distance")+ 
+  
+  stat_compare_means(label="p.format")
+pa1
+
+#p.format
+#label="p.signif"
+
+
+pa2 <- ggplot(g3.bray.df, aes(x=Treatment_type, y=dist, fill=BE2))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme(legend.direction = "horizontal",legend.position=c(0.7,0.2)) +
+  labs(title="Beta diversity(bray)", x="", y="distance")+ 
+  
+  stat_compare_means(label="p.format")
+pa2
+
+
+pa3 <- ggplot(g10.bray.df, aes(x=Drug_type, y=dist, fill=BE2))+ 
+  geom_boxplot(outlier.shape=NA)+theme_classic() + 
+  theme(legend.direction = "horizontal",legend.position=c(0.7,0.2)) +
+  labs(title="Beta diversity(bray)", x="", y="distance")+ 
+  
+  stat_compare_means(label="p.format")
+pa3
+
+```
+
+

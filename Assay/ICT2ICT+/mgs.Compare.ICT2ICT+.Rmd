@@ -1,0 +1,407 @@
+---
+title: "mgs.compare.ICT:ICT+"
+output:
+  html_notebook:
+    code_fold: hide
+---
+
+参考该文章`Intestinal microbiome analyses identify melanoma patients at risk for checkpoint-blockade-induced colitis`
+比较七个ICT，ICT+变换治疗的病人两样本之间的差异
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(vegan)
+library(ggplot2)
+library(ggpubr)
+library(ggsignif)
+library(dplyr)
+library(reshape2)
+library(patchwork)
+library(plyr)
+library(VennDiagram)
+source("../common.R")
+source("../TEST.functions.R")
+do.write<-F
+```
+
+
+```{r}
+#计算alpha多样性
+alpMethod <- function(selpro, m, group){
+  if (m=="shannon"){
+    index <- diversity(t(selpro), index = m, base = exp(1))
+  }else if(m=="richness"){
+    index <- rowSums(t(selpro) > 0)
+  }else if(m=="Pielou"){
+    index <- diversity(t(selpro),"shannon", base = exp(1)) /log(specnumber(t(selpro)))
+  }
+  return(index)
+}
+
+```
+
+
+# 载入mgs丰度表
+```{r}
+mgs <- read.table("../../Result/02.gene2MGS/IGC.mgs.79.abundance.profile.txt", sep = "\t", row.names = 1, header = T)
+mgs <- mgs[rowSums(mgs)!=0,]
+# trans to relative aboundance
+mgs <- mgs/1000000  # total gene aboundance is 1000000
+
+#phenotype
+load("../../Result/01.Profile/phe1.RData")
+load("../../Result/01.Profile/relDaysgroups.RData")
+```
+
+mgs丰度分布情况
+```{r}
+# mgs$Taxonomy <- factor(rownames(mgs), levels = rownames(mgs))
+# mgs <- melt(mgs, id = 'Taxonomy')
+# names(mgs)[2] <-'sample'
+# mgs <- mgs%>%filter(value>0)
+# mgs <- mgs[order(mgs$value),]
+# ggplot(mgs, aes(x=value)) + geom_bar()
+
+```
+
+
+```{r}
+#phe <- phe.210616 #%>%filter(Fecal.sample.name%in%fecn.w50) # 不剔除样本
+phe <- phe.210701
+phe$Sample.collection.time <-  as.Date(phe$Sample.collection.time, format = "%Y/%m/%d")
+#phe <- phe%>%filter(Antibiotic.use == "No")
+phe$c2s <- "same"
+phe$c2s[which(phe$Patient.ID%in%diff2sam)] <- "diff"
+```
+
+
+```{r}
+if(file.exists("../../Result/04.Globalview/g2g.compare.RData")){
+  load("../../Result/04.Globalview/g2g.compare.RData")
+}else{
+  g2g3 <- combn(levels(droplevels(phe$Treatment_type)),2)
+  compare_g3 <- list(g2g3[,1],g2g3[,2],g2g3[,3])
+  g2g5 <- combn(levels(droplevels(phe$Group)),2)
+  compare_g5 <- list(g2g5[,1],g2g5[,2],g2g5[,3],g2g5[,4],g2g5[,5],g2g5[,6],g2g5[,7],g2g5[,8],g2g5[,9],g2g5[,10])
+  g2g10 <- combn(levels(droplevels(phe$Drug_type)),2)
+  compare_g10 <- list(g2g10[,1],g2g10[,2],g2g10[,3],g2g10[,4],g2g10[,5],g2g10[,6],g2g10[,7],g2g10[,8],g2g10[,9],g2g10[,10],g2g10[,11],g2g10[,12],g2g10[,13],g2g10[,14],g2g10[,15])
+  save(compare_g3,compare_g5, compare_g10, file = "../../Result/04.Globalview/g2g.compare.RData")
+}
+
+```
+
+计算alpha多样性
+```{r}
+rownames(phe) <- phe$Fecal.sample.name
+Shannon <- alpMethod(mgs,"shannon",phe)
+Richness <- alpMethod(mgs,"richness",phe)
+Pielou <- alpMethod(mgs,"Pielou",phe)
+alpindex <- cbind(Shannon,Richness, Pielou)
+mgs.alp <- merge(alpindex, phe, by = "row.names")    #合并表格
+
+mgs.alp$Treatment_type <- as.factor(mgs.alp$Treatment_type)   #设定因子水平
+mgs.alp$Group <- as.factor(mgs.alp$Group)
+mgs.alp$Drug_type <- as.factor(mgs.alp$Drug_type)
+#save(mgs.alp,file="../Result/04.Globalview/1.Alpha/bmc.sum.BE3.Alp.RData")
+
+f.mgs.alp <- mgs.alp%>%filter(sample_order=="1"|sample_order=="-")
+s.mgs.alp <- mgs.alp%>%filter(sample_order=="1"|sample_order=="2")
+
+```
+
+
+# ICT  ICT+ 比较分析
+
+## 0.7个样本的取样时间表 
+```{r}
+
+
+```
+
+## 1. 多样性之间分析
+```{r}
+ICT.1 <- s.mgs.alp[which(s.mgs.alp$Group=="ICT"),"Patient.ID"]
+ICT.1.s.mgs.alp <- s.mgs.alp%>%filter(Patient.ID%in%ICT.1)
+ICT.1.s.mgs.alp$group <- "ICT"
+ICT.1.s.mgs.alp[which(ICT.1.s.mgs.alp$Group!="ICT"),"group"] <- "ICT+"
+
+# 使用秩和检验的配对检验
+p_ict <- ggplot(data = ICT.1.s.mgs.alp%>%filter(c2s=="diff"), aes(x=group, y=Shannon)) +
+  geom_boxplot(aes(fill=group))+ 
+  stat_compare_means(aes(group= group),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + 
+  theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+
+  facet_wrap(~c2s)+ geom_point() +
+  geom_line(aes(group=Patient.ID), color="gray") + ylab("Shannon diversity index") +
+ggplot(data = ICT.1.s.mgs.alp%>%filter(c2s=="diff"), aes(x=group, y=Richness)) + 
+  geom_boxplot(aes(fill=group))+ stat_compare_means(aes(group= group),method = "wilcox.test",size=4,label = "p.format",paired=TRUE, alternative = "two.sided") +
+  theme_classic() + labs(x='',title='')  +geom_point() + 
+  theme(axis.text.x = element_text())+facet_wrap(~c2s)+ 
+  geom_point() +geom_line(aes(group=Patient.ID), color="gray") + ylab("MGS number") +
+ggplot(data = ICT.1.s.mgs.alp%>%filter(c2s=="same"), aes(x=sample_order, y=Shannon)) + 
+  geom_boxplot(aes(fill=sample_order))+ 
+  stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + 
+  theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~c2s)+ 
+  geom_point() +geom_line(aes(group=Patient.ID), color="gray")+xlab("ICT")+ ylab("Shannon diversity index") +
+ggplot(data = ICT.1.s.mgs.alp%>%filter(c2s=="same"), aes(x=sample_order, y=Richness)) +
+  geom_boxplot(aes(fill=sample_order))+ 
+  stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + 
+  theme_classic() + labs(x='',title='') +geom_point()+ 
+  theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +
+  geom_line(aes(group=Patient.ID), color="gray")+xlab("ICT") + ylab("MGS number")
+
+p_ict
+if(do.write){
+  ggsave(p_ict, width=6, heigh=6,filename = "../../Result/04.Globalview/1.Alpha/S52/mgs.diff.alpha_ICT_ICT+.shannon_richness.pair.wilcox.boxplot.pdf")
+}
+
+```
+
+通过双端配对wilcox检验可知，同一病人ICT ICT+样本之间多样性具有显著差异；其中ICT样本多样性显著较高
+
+
+## 2. 查看ICT和ICT+共有的MGS/独有的MGS
+
+```{r}
+# ICT.mICT.all <- ICT.1.s.mgs.alp[which(ICT.1.s.mgs.alp$c2s=="diff"),] # 7个病人中的ICT治疗样本
+# ICT.mICT.mgs <- mgs[,ICT.mICT.all$Row.names]
+# ICT.mICT.mgs <- ICT.mICT.mgs[rowSums(ICT.mICT.mgs)>0,]
+# 
+# for (i in unique(ICT.mICT.all$Patient.ID)) {
+#   ict.s <- ICT.mICT.all[which(ICT.mICT.all$Patient.ID==i&ICT.mICT.all$group=="ICT"),"Fecal.sample.name"]
+#   mict.s <- ICT.mICT.all[which(ICT.mICT.all$Patient.ID==i&ICT.mICT.all$group=="ICT+"),"Fecal.sample.name"]
+#   ICT.mICT.mgs[which(ICT.mICT.mgs[,as.character(ict.s)]!=0&ICT.mICT.mgs[,as.character(mict.s)]!=0),i] <- "gmgs"
+#   ICT.mICT.mgs[which(ICT.mICT.mgs[,as.character(ict.s)]==0&ICT.mICT.mgs[,as.character(mict.s)]!=0),i] <- "mimgs"
+#   ICT.mICT.mgs[which(ICT.mICT.mgs[,as.character(ict.s)]!=0&ICT.mICT.mgs[,as.character(mict.s)]==0),i] <- "imgs"
+#   ICT.mICT.mgs[which(ICT.mICT.mgs[,as.character(ict.s)]==0&ICT.mICT.mgs[,as.character(mict.s)]==0),i] <- "NAs"
+# }
+# 
+# # 在14个样本中均共有的mgs
+# x <- ICT.mICT.mgs%>%filter(`P-001`=="gmgs"&`P-014`=="gmgs"&`P-027`=="gmgs"&`P-028`=="gmgs"&`P-037`=="gmgs"&`P-051`=="gmgs"&`P-064`=="gmgs")
+# ggplot(x) + 
+#   geom_point(aes(x=P_001_2, y=P_001_1), color="#d53e4f", alpha=0.3,size=2)+
+#   geom_point(aes(x=P_014_2, y=P_014_1), color="#fc8d59", alpha=0.3,size=2)+
+#   geom_point(aes(x=P_027_2, y=P_027_1), color="#fee08b", alpha=0.3,size=2)+
+#   geom_point(aes(x=P_028_2, y=P_028_1), color="#ffffbf", alpha=0.3,size=2)+
+#   geom_point(aes(x=P_037_1, y=P_037_2), color="#e6f598", alpha=0.3,size=2)+
+#   geom_point(aes(x=P_051_3, y=P_051_2), color="#99d594", alpha=0.3,size=2)+
+#   geom_point(aes(x=P_064_1, y=P_064_2), color="#3288bd", alpha=0.3,size=2)+
+#   scale_y_log10() +scale_x_log10() + theme_classic()+
+#   xlab("Mean relative mgs abundance(log10) ICT") + 
+#   ylab("Mean relative mgs abundance(log10) ICT+")
+# 
+# y <- ICT.mICT.mgs[-which(rownames(ICT.mICT.mgs)%in%rownames(x)),]
+# 
+# ggplot(y) + 
+#   geom_point(aes(x=P_001_2, y=P_001_1), color="#d53e4f", alpha=0.5,size=2)+
+#   geom_point(aes(x=P_014_2, y=P_014_1), color="#fc8d59", alpha=0.5,size=2)+
+#   geom_point(aes(x=P_027_2, y=P_027_1), color="#fee08b", alpha=0.5,size=2)+
+#   geom_point(aes(x=P_028_2, y=P_028_1), color="#ffffbf", alpha=0.5,size=2)+
+#   geom_point(aes(x=P_037_1, y=P_037_2), color="#e6f598", alpha=0.5,size=2)+
+#   geom_point(aes(x=P_051_3, y=P_051_2), color="#99d594", alpha=0.5,size=2)+
+#   geom_point(aes(x=P_064_1, y=P_064_2), color="#3288bd", alpha=0.5,size=2)+
+#   scale_y_log10() +scale_x_log10() + theme_classic()+
+#   xlab("Mean relative mgs abundance(log10) ICT") + 
+#   ylab("Mean relative mgs abundance(log10) ICT+")
+# 
+# 
+# # 独特mgs分布情况
+
+
+```
+
+参考文章来看，分别计算在ICT或者ICT+中平均丰度1e-07的mgs
+ict中平均丰度1e-07的mgs
+```{r}
+ict.mgs.s <- ICT.1.s.mgs.alp$Row.names[which(ICT.1.s.mgs.alp$c2s=="diff"&ICT.1.s.mgs.alp$Group=="ICT")] # 7个病人中的ICT治疗样本
+ict.mgs <- mgs[,ict.mgs.s]
+ict.mgs.0.01 <- ict.mgs[rowSums(ict.mgs)/dim(ict.mgs)[2] > 1e-07,] # 计算平均丰度>1-e06的物种
+```
+
+ict+中平均丰度1e-07的mgs
+```{r}
+mict.mgs.s <- ICT.1.s.mgs.alp$Row.names[which(ICT.1.s.mgs.alp$c2s=="diff"&ICT.1.s.mgs.alp$Group!="ICT")] # 7个病人中的ICT治疗样本
+mict.mgs.s <- mgs[,mict.mgs.s]
+mict.mgs.0.01 <- mict.mgs.s[rowSums(mict.mgs.s)/dim(mict.mgs.s)[2] > 1e-07,] # 计算平均丰度>1e-07的物种
+```
+
+
+共有mgs绘制韦恩图
+```{r}
+library(VennDiagram)
+if(do.write){
+  v.plot <- venn.diagram(x=list("ICT"=rownames(ict.mgs.0.01), "ICT+"=rownames(mict.mgs.0.01)),color = "", fill = c("#F08080", "#6495ED"),height = 150, width = 150,filename = NULL)
+  pdf(file="../../Result/05.ICT2ICT+/ICT.ICT+.mgs.1e-07.Venn.pdf", height = 3, width = 3)
+  grid.draw(v.plot)
+  dev.off()
+}
+
+
+```
+
+独特mgs出现频率
+```{r}
+#ICT 计算对应mgs出现频率
+for(i in c(1:dim(ict.mgs.0.01)[1])){
+  ict.mgs.0.01[i,"ICT_Average"] <- rowSums(ict.mgs.0.01[i,c(1:7)])/7
+  ict.mgs.0.01[i,"ICT_Occ."] <- length(which(ict.mgs.0.01[i,c(1:7)]!=0))
+}
+
+ict.mgs.0.01$ICT_Occ. <- as.factor(ict.mgs.0.01$ICT_Occ.)
+
+ggplot() + geom_bar(data=ict.mgs.0.01, aes(x=ICT_Occ.), fill = "red") + xlab("Number of patients") + ylab("Frequency of mgs") + theme_classic()
+
+#ICT+ 计算对应mgs出现频率
+for(i in c(1:dim(mict.mgs.0.01)[1])){
+  mict.mgs.0.01[i,"mICT_Average"] <- rowSums(mict.mgs.0.01[i,c(1:7)])/7
+  mict.mgs.0.01[i,"mICT_Occ."] <- length(which(mict.mgs.0.01[i,c(1:7)]!=0))
+}
+
+mict.mgs.0.01$Occ. <- as.factor(mict.mgs.0.01$mICT_Occ.)
+ggplot() + geom_bar(data=mict.mgs.0.01, aes(x=mICT_Occ.), fill = "#1E90FF") + xlab("Number of patients") + ylab("Frequency of mgs") + theme_classic()
+```
+
+```{r}
+# ICT和ICT+共有mgs出现频率
+intes.mgs <- intersect(rownames(mict.mgs.0.01), rownames(ict.mgs.0.01))
+length(intes.mgs)
+ggplot() + geom_bar(data=ict.mgs.0.01[intes.mgs,], aes(x=ICT_Occ.), fill = "red") + xlab("Number of patients") + ylab("Frequency of mgs") + theme_classic()
+ggplot() + geom_bar(data=mict.mgs.0.01[intes.mgs,], aes(x=mICT_Occ.), fill = "#1E90FF") + xlab("Number of patients") + ylab("Frequency of mgs") + theme_classic()
+
+# 共有mgs 在ICT ICT+中出现的频率，位置代表丰度，大小代表频率
+res <- cbind(ict.mgs.0.01[intes.mgs,], mict.mgs.0.01[intes.mgs,])
+res$frequency <- (as.numeric(res$ICT_Occ.)+as.numeric(res$mICT_Occ.))/14
+cor(res$ICT_Average,res$mICT_Average,method="s",use="pairwise.complete.obs")
+inter.res <- ggplot(res) + 
+  geom_point(aes(x=ICT_Average, y=mICT_Average,size=frequency), color="#8979b3", alpha=0.5) + 
+  # geom_point(aes(x=P_001_2, y=P_001_1), color="#d53e4f", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_014_2, y=P_014_1), color="#fc8d59", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_027_2, y=P_027_1), color="#fee08b", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_028_2, y=P_028_1), color="#ffffbf", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_037_1, y=P_037_2), color="#e6f598", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_051_3, y=P_051_2), color="#99d594", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_064_1, y=P_064_2), color="#3288bd", alpha=0.3,size=2)+
+  scale_y_log10() +scale_x_log10() + theme_classic()+
+  stat_smooth(aes(x=ICT_Average,y=mICT_Average), method=lm, alpha = 0.2, color="#4b0080")+
+  xlab("Mean mgs abundance(ICT) ") + 
+  ylab("Mean mgs abundance(ICT+) ")+
+  ggtitle("Correlation between ICT and ICT+ (r=0.695)")
+
+inter.res
+if(do.write){
+  ggsave(inter.res, width = 8, height = 7, filename = "../../Result/05.ICT2ICT+/ICT2ICT+.1-e07.point.pdf")
+}
+# 丰度代表
+sum(ict.mgs.0.01[intes.mgs,"ICT_Average"])/sum(ict.mgs.0.01$ICT_Average)
+
+sum(mict.mgs.0.01[intes.mgs,"mICT_Average"])/sum(mict.mgs.0.01$mICT_Average)
+
+# 特有mgs的丰度分布
+ict.uniq.res <- ict.mgs.0.01[ict.uniq.mgs,]
+mict.uniq.res <- mict.mgs.0.01[mict.uniq.mgs,]
+
+ggplot() + 
+  geom_point(data=ict.uniq.res,aes(x=ICT_Average, y=ICT_Occ.), color="#ff9999", alpha=0.5) + scale_x_log10()+
+  theme_bw()+
+  
+ggplot() + 
+  geom_point(data=mict.uniq.res,aes(x=mICT_Average, y=mICT_Occ.), color="#7e9fe7", alpha=0.5)+theme_bw()
+
+```
+
+
+```{r}
+# ICT中特有的mgs
+ict.uniq.mgs <- setdiff(rownames(ict.mgs.0.01),intes.mgs)
+length(ict.uniq.mgs)
+A <- ggplot() + geom_bar(data=ict.mgs.0.01[ict.uniq.mgs,], aes(x=ICT_Occ.), fill="#ff9999", position="dodge") + xlab("Number of patients") + ylab("Frequency of unique mgs(ICT)") + theme_classic()
+
+# ICT+中特有的mgs
+mict.uniq.mgs <- setdiff(rownames(mict.mgs.0.01),intes.mgs)
+length(mict.uniq.mgs)
+mict.mgs.0.01$mICT_Occ. <- as.factor(mict.mgs.0.01$mICT_Occ.)
+B <- ggplot() + geom_bar(data=mict.mgs.0.01[mict.uniq.mgs,], aes(x=mICT_Occ.), fill = "#7e9fe7",alpha=0.6) + xlab("Number of patients") + ylab("Frequency of unique mgs(ICT+)") + theme_classic()
+
+A+B
+
+if(do.write){
+  ggsave(A+B, width = 6, height = 4, filename = "../../Result/05.ICT2ICT+/ICT_ICT+.uniq.mgs.1-e07.barplot.pdf")
+}
+
+pab <- ggplot() + geom_bar(data=ict.mgs.0.01[ict.uniq.mgs,], aes(x=ICT_Occ.), color = "#ff9999", fill="white", position="dodge") + xlab("Number of patients") + ylab("Frequency of unique mgs") + theme_classic()+ geom_bar(data=mict.mgs.0.01[mict.uniq.mgs,], aes(x=mICT_Occ.), fill = "#7e9fe7",alpha=0.6)
+pab
+if(do.write){
+  ggsave(pab, width = 4, height = 4, filename = "../../Result/05.ICT2ICT+/ICT_ICT+.uniq.mgs.1-e07.barplot2.pdf")
+}
+```
+
+
+# ICT1:ICT2
+
+```{r}
+ICT.1.s.mgs.alp%>%filter(c2s=="same")
+ict.mgs.same <- ICT.1.s.mgs.alp%>%filter(c2s=="same") # 10个病人中的ICT治疗样本
+same.ict.mgs.1 <- mgs[,ict.mgs.same$Fecal.sample.name[ict.mgs.same$sample_order=="1"]]
+same.ict.mgs.1.0.01 <- same.ict.mgs.1[rowSums(same.ict.mgs.1)/dim(same.ict.mgs.1)[2] > 1e-07,] # 计算平均丰度>1-e07的物种
+
+same.ict.mgs.2 <- mgs[,ict.mgs.same$Fecal.sample.name[ict.mgs.same$sample_order=="2"]]
+same.ict.mgs.2.0.01 <- same.ict.mgs.2[rowSums(same.ict.mgs.2)/dim(same.ict.mgs.2)[2] > 1e-07,] # 计算平均丰度>1-e07的物种
+
+library(VennDiagram)
+if(do.write){
+  v.plot <- venn.diagram(x=list("ICT-1"=rownames(same.ict.mgs.1.0.01), "ICT-2"=rownames(same.ict.mgs.2.0.01)),color = "", fill = c("#F08080", "#6495ED"),height = 1500, width = 1500, filename = NULL)
+  pdf(file="../../Result/05.ICT2ICT+/same.ICT1_ICT2.mgs.Venn.pdf", height = 3, width = 3)
+  grid.draw(v.plot)
+  dev.off()
+}
+
+```
+
+```{r}
+#ICT1 计算对应mgs出现频率
+for(i in c(1:dim(same.ict.mgs.1.0.01)[1])){
+  same.ict.mgs.1.0.01[i,"ICT1_Average"] <- rowSums(same.ict.mgs.1.0.01[i,c(1:10)])/10
+  same.ict.mgs.1.0.01[i,"ICT1_Occ."] <- length(which(same.ict.mgs.1.0.01[i,c(1:10)]!=0))
+}
+same.ict.mgs.1.0.01$ICT1_Occ. <- as.factor(same.ict.mgs.1.0.01$ICT1_Occ.)
+
+#ICT2 计算对应mgs出现频率
+for(i in c(1:dim(same.ict.mgs.2.0.01)[1])){
+  same.ict.mgs.2.0.01[i,"ICT2_Average"] <- rowSums(same.ict.mgs.2.0.01[i,c(1:10)])/10
+  same.ict.mgs.2.0.01[i,"ICT2_Occ."] <- length(which(same.ict.mgs.2.0.01[i,c(1:10)]!=0))
+}
+same.ict.mgs.2.0.01$ICT2_Occ. <- as.factor(same.ict.mgs.2.0.01$ICT2_Occ.)
+
+# ICT1和ICT2共有mgs出现频率
+intes.mgs <- intersect(rownames(same.ict.mgs.1.0.01), rownames(same.ict.mgs.2.0.01))
+length(intes.mgs)
+
+
+# 共有mgs 在ICT ICT+中出现的频率，位置代表丰度，大小代表频率
+res <- cbind(same.ict.mgs.1.0.01[intes.mgs,], same.ict.mgs.2.0.01[intes.mgs,])
+res$frequency <- (as.numeric(res$ICT1_Occ.)+as.numeric(res$ICT2_Occ.))/20
+cor(res$ICT1_Average,res$ICT2_Average,method="s",use="pairwise.complete.obs")
+inter.res <- ggplot(res) + 
+  geom_point(aes(x=ICT1_Average, y=ICT2_Average,size=frequency), color="#8979b3", alpha=0.5) + 
+  # geom_point(aes(x=P_001_2, y=P_001_1), color="#d53e4f", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_014_2, y=P_014_1), color="#fc8d59", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_027_2, y=P_027_1), color="#fee08b", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_028_2, y=P_028_1), color="#ffffbf", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_037_1, y=P_037_2), color="#e6f598", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_051_3, y=P_051_2), color="#99d594", alpha=0.3,size=2)+ 
+  # geom_point(aes(x=P_064_1, y=P_064_2), color="#3288bd", alpha=0.3,size=2)+
+  scale_y_log10() +scale_x_log10() + theme_classic()+
+  stat_smooth(aes(x=ICT1_Average,y=ICT2_Average), method=lm, alpha = 0.2, color="#4b0080")+
+  xlab("Mean mgs abundance(ICT) ") + 
+  ylab("Mean mgs abundance(ICT+) ")+
+  ggtitle("Correlation between ICT-1 and ICT-2 (r=0.734)")
+
+inter.res
+if(do.write){
+  ggsave(inter.res, width = 8, height = 7, filename = "../../Result/05.ICT2ICT+/same.ICT1_ICT2.1-e07.point.pdf")
+}
+```
+
+
+
+
+

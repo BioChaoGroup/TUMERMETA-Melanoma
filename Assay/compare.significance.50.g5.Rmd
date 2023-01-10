@@ -1,0 +1,361 @@
+---
+title: "Compare the different species(mgs) of 50 melanoma samples"
+author: "pengzhuobing"
+date: "2021/6/16"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load fucntions
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(pheatmap)
+library(plyr)
+library(RColorBrewer)
+library(ComplexHeatmap)
+library(patchwork)
+library(rJava)
+library(xlsxjars)
+library(xlsx)
+source("./TEST.functions.R") #这里加载写好的功能，后面用到的ttFun，tkFun
+do.write <- T
+```
+
+```{r, warning=FALSE}
+#phenotype
+load("../Result/01.Profile/phe.RData")
+
+phe <- phe.210616%>%filter(sample_order=="1"|sample_order=="-") # 选择受试者第一个样本做检验
+phe <- phe[order(phe$Fecal.sample.name),]  
+rownames(phe) <- phe$Fecal.sample.name
+# mgs.prf
+prf <- read.table("../Result/02.gene2MGS/IGC.mgs.79.abundance.profile.txt", sep = "\t", row.names = 1, header = T)
+prf <- prf[rowSums(prf)!=0,]
+
+# trans to relative aboundance
+prf <- prf/1000000  # total gene aboundance is 1000000
+
+#for (i in 1:dim(prf)[2]){
+#  rog5 = sum(prf[,i])
+#  for (j in 1:dim(prf)[1]){
+#    prf[j,i] <- prf[j,i]/rog5
+#  }
+#}
+
+# mgs.annotation
+mgs.V2.anno <- read.table("../Result/01.Profile/00.IGC.MGS.annotation",sep="\t",header=T) 
+mgs.V2.anno$mgs.V2 <- sub(":",".",mgs.V2.anno$X)
+mgs.V2.anno2 <- mgs.V2.anno[,c(8,2,3)]
+
+#自定义显著性标记函数，此处显著性标记使用“*”
+sig_label<-function(x){ifelse(x<0.001&x>0,"***",ifelse(x<0.01,"**",ifelse(x<0.05,"*","")))}
+sig <- function(x){ifelse(x=="**"|x=="***"|x=="****", 23, ifelse(x=="*", 23, 21))}
+#cols <- function(x){ifelse(x=="**", "3", ifelse(x=="*", "3", "2"))}
+
+```
+
+
+**The following is sample and grouping information: **
+```{r,warning=FALSE,echo=FALSE}
+
+# PR : NR
+BE2.gro <- phe
+BE2.prf <- prf[,as.character(BE2.gro$Fecal.sample.name)]
+# sample info
+
+# 10 group
+table(BE2.gro$Drug_type, BE2.gro$BE2)
+# 5 group
+table(BE2.gro$Group, BE2.gro$BE2)
+# 3 group
+table(BE2.gro$Treatment_type, BE2.gro$BE2)
+
+```
+# ano for 5 group
+```{r}
+# x <- t(BE2.prf)
+# x <- cbind(BE2.gro[,c(5,12)],x)
+# for (i in c(3:dim(x)[2]-3)){
+#   mgs <- as.factor(colnames(x)[i])
+#   print(mgs)
+#   aov(mgs~Group, data=x)
+#   #TukeyHSD(dd)
+#   #summary(dd)
+#   #summary(TukeyHSD(dd))
+# }
+# 
+# dd <- aov(i~Group, data=x)
+# TukeyHSD(dd)
+# summary(dd)
+# summary(TukeyHSD(dd))
+
+
+```
+
+
+
+```{r}
+### **Perform Kw test on 3 group**
+
+# 3 group
+table(BE2.gro$Treatment_type)
+rownames(BE2.gro) <- BE2.gro$Fecal.sample.name
+sel.g3.diff.kw.spe <- tkFun(prf, BE2.gro, "Fecal.sample.name", "Treatment_type", NULL, ex.0=T)
+ 
+table(BE2.gro$Group)
+sel.g5.diff.aov.spe <- aovFun(prf, BE2.gro, "Fecal.sample.name", "Group", NULL, ex.0=T)
+
+
+# 5 group one 2 one
+g2g5 <- combn(levels(droplevels(BE2.gro$Group)),2)
+compare_g5 <- list(g2g5[,1],g2g5[,2],g2g5[,3],g2g5[,4],g2g5[,5],g2g5[,6],g2g5[,7],g2g5[,8],g2g5[,9],g2g5[,10])
+
+
+if(file.exists("../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.RData")){
+  load("../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.RData")
+}else{
+  sum.g5.group.test <- NULL  
+  for(i in c(1:length(compare_g5))){
+    tsi.phe <- BE2.gro%>%filter(Group==compare_g5[[i]][1]|Group==compare_g5[[i]][2])
+    #tsi.phe <- tsi.phe[order(interaction(tsi.phe$Group,tsi.phe$BE2)),]  
+    rownames(tsi.phe) <- tsi.phe$Fecal.sample.name
+    #tsi.prf <- BE2.prf[,as.character(tsi.phe$Fecal.sample.name)] 
+    ### tsi.g5.BE2.w <- aovFun(tsi.prf,tsi.phe,"DNAID","BE2","BMI",ex.0=F)
+    tsi.phe$Fecal.sample.name <- droplevels(tsi.phe$Fecal.sample.name)
+    tsi.phe$Group <- droplevels(tsi.phe$Group)
+    tsi.g5.group.w <- ttFun(prf,tsi.phe,"Fecal.sample.name","Group",NULL,ex.0=F) 
+    #得到显著性标记矩阵\
+    tsi.g5.group.w$sig_FDR<-sig_label(tsi.g5.group.w$p.value)
+    g <- ggplot(tsi.g5.group.w,aes(x=FDR,fill=Enrich)) + geom_histogram(position="stack") + xlim(c(0,1))
+    tsi.g5.group.w<-tsi.g5.group.w%>%filter(p.value<0.05&Pct>20&Occ.>0.2)
+    sum.g5.group.test[[i]] <- tsi.g5.group.w
+  }
+  if(do.write){
+    save(sum.g5.group.test,file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.RData")
+  }
+}
+
+
+if(do.write){
+  write.xlsx(sum.g5.group.test[[1]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT-ICT.BRAF", row.names=FALSE)
+  write.xlsx(sum.g5.group.test[[2]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT-ICT.PTXF", append=TRUE, row.names=FALSE)     #append用于追加不同sheet
+  write.xlsx(sum.g5.group.test[[3]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT-ICT.TKI", append=TRUE, row.names=FALSE)
+  write.xlsx(sum.g5.group.test[[4]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT-ICT.TMZ", append=TRUE,row.names=FALSE)
+  write.xlsx(sum.g5.group.test[[5]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT.BRAF-ICT.PTX", append=TRUE, row.names=FALSE)   
+  write.xlsx(sum.g5.group.test[[6]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT.BRAF-ICT.TKI", append=TRUE, row.names=FALSE)   
+  write.xlsx(sum.g5.group.test[[7]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT.BRAF-ICT.TMZ", append=TRUE, row.names=FALSE)
+  write.xlsx(sum.g5.group.test[[8]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT.PTX-ICT.TKI", append=TRUE, row.names=FALSE)  
+  write.xlsx(sum.g5.group.test[[9]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT.PTX-ICT.TMZ", append=TRUE, row.names=FALSE) 
+  write.xlsx(sum.g5.group.test[[10]], file="../Result/03.Comparison/S50/bmc.sum.g5g2g.w.p50.sign.xlsx", sheetName="ICT.TKI-ICT.TMZ", append=TRUE, row.names=FALSE)  
+}
+
+```
+# ICT:其他四组
+```{r}
+
+
+if(file.exists("../Result/03.Comparison/S50/bmc.ict2o.w.p50.RData")){
+  load("../Result/03.Comparison/S50/bmc.ict2o.w.p50.RData")
+}else{
+  sum.g5.group.test <- NULL  
+  for(i in c(1:4)){
+    tsi.phe <- BE2.gro%>%filter(Group==compare_g5[[i]][1]|Group==compare_g5[[i]][2])
+    rownames(tsi.phe) <- tsi.phe$Fecal.sample.name
+    tsi.phe$Fecal.sample.name <- droplevels(tsi.phe$Fecal.sample.name)
+    tsi.phe$Group <- droplevels(tsi.phe$Group)
+    tsi.g5.group.w <- ttFun(prf,tsi.phe,"Fecal.sample.name","Group",NULL,ex.0=F) 
+    colnames(tsi.g5.group.w)[c(7,10)]<-c("other","median.other")
+    #得到显著性标记矩阵\
+    tsi.g5.group.w$sig_FDR<-sig_label(tsi.g5.group.w$p.value)
+    g <- ggplot(tsi.g5.group.w,aes(x=FDR,fill=Enrich)) + geom_histogram(position="stack") + xlim(c(0,1))
+    sum.g5.group.test[[i]] <- tsi.g5.group.w
+  }
+  if(do.write){
+    save(sum.g5.group.test,file="../Result/03.Comparison/S50/bmc.ict2o.w.p50.RData")
+  }
+}
+
+sum.ict2o.wilcox.df <- full_join(
+  cbind(group="ICT-ICT.BRAF",sum.g5.group.test[[1]]),
+  cbind(group="ICT-ICT.PTX",sum.g5.group.test[[2]])
+)
+sum.ict2o.wilcox.df <- full_join(sum.ict2o.wilcox.df,
+  cbind(group="ICT-ICT.TKI",sum.g5.group.test[[3]])
+)
+sum.ict2o.wilcox.df <- full_join(sum.ict2o.wilcox.df,
+  cbind(group="ICT-ICT.TMZ",sum.g5.group.test[[4]])
+)
+```
+
+
+#### **1. P.value distribution**
+
+```{r,echo=FALSE}
+ggplot(sum.ict2o.wilcox.df%>%filter(Pct>20&Occ.>0.2), 
+       aes(x=p.value,color=group)) + geom_density()
+```
+
+#### **2. P.value statistics**
+
+P.value < 0.05:
+```{r,echo=FALSE}
+select.ict2o.wilcox.0.05 <- sum.ict2o.wilcox.df%>%filter(p.value < 0.05 & Pct >= 20 & Occ.>0.2)
+table(select.ict2o.wilcox.0.05$group, select.ict2o.wilcox.0.05$Enrich)
+
+sign.mgs <- unique(select.ict2o.wilcox.0.05$mgs.V2)
+select.ict2o.wilcox.0.05.a <- sum.ict2o.wilcox.df%>%filter(mgs.V2%in%sign.mgs)
+```
+
+P.value < 0.01:
+```{r,echo=FALSE}
+select.ict2o.wilcox.0.01 <- sum.ict2o.wilcox.df%>%filter(p.value < 0.01 & Pct >= 20 & Occ.>0.2)
+table(select.ict2o.wilcox.0.01$group, select.ict2o.wilcox.0.01$Enrich)
+
+```
+
+#### **3. show enriched (P < 0.05)** 
+
+```{r}
+sign.BE2.prf <- BE2.prf[sign.mgs,]
+sign.BE2.prf[sign.BE2.prf == 0] <- 1e-13
+sign.BE2.prf <- apply(sign.BE2.prf, 2, function(x) log10(x)) #使用log 标准化
+sign.BE2.prf <- t(sign.BE2.prf)
+sign.BE2.prf <- sign.BE2.prf[order(BE2.gro$Group),]
+
+#添加注释信息
+annot_data_group <- data.frame(row.names = BE2.gro$Fecal.sample.name, group = BE2.gro$Group)
+
+phe.p <- pheatmap(mat = sign.BE2.prf, 
+         # 边框颜色
+         border_color = NA,
+         # 是否进行聚类
+         fontsize_row = 7.5,
+         fontsize_col = 7.5,
+         angle_col = 315,
+         cluster_row = F,  cluster_col = T,
+         clustering_method = "complete",
+         annotation_row = annot_data_group,
+         # 分割热图
+         gaps_row = c(23, 32,38,43)
+         )
+
+phe.p
+
+if(do.write){
+  ggsave(phe.p, width = 10, height = 8, filename = "../Result/03.Comparison/S50/bmc.ict_othergroup.allsample.wilcox.p0.05.heatmap.pdf")
+}
+```
+
+```{r, echo=FALSE}
+ICT.g5.median.matrix <- dcast(select.ict2o.wilcox.0.05.a,mgs.V2~group,value.var = "median.ICT")
+other.g5.median.matrix <- dcast(select.ict2o.wilcox.0.05.a,mgs.V2~group,value.var = "median.other")
+sum.g5.median.matrix <- cbind(ICT.g5.median.matrix,other.g5.median.matrix[,-1])
+colnames(sum.g5.median.matrix)[2:9] <- paste0(colnames(sum.g5.median.matrix)[2:9],rep(c("_ICT",""),each=4))
+rownames(sum.g5.median.matrix) <- sum.g5.median.matrix[,1]
+sum.g5.median.matrix <- sum.g5.median.matrix[,-1]
+
+sum.g5.median.matrix <- apply(sum.g5.median.matrix,1:2,function(x) ifelse(is.na(x),0,x))
+sum.g5.median.matrix <- apply(sum.g5.median.matrix,1:2,function(x) ifelse(x==0,-10,log10(x)))
+```
+
+
+
+```{r,echo=FALSE}
+
+# cluster by "hclust"
+#
+out.dist=dist(sum.g5.median.matrix,method="euclidean")
+out.hclust=hclust(out.dist,method="complete")
+plot(out.hclust)
+
+
+sum.g5.median.matrix <- sum.g5.median.matrix[out.hclust$order, ]
+
+```
+
+
+```{r}
+## plot2
+
+value <- rep(0.5, dim(sum.g5.median.matrix)[1])
+ICT.BRAF <- select.ict2o.wilcox.0.05.a%>%filter(group == "ICT-ICT.BRAF")
+ICT.PTX <- select.ict2o.wilcox.0.05.a%>%filter(group == "ICT-ICT.PTX")
+ICT.TKI <- select.ict2o.wilcox.0.05.a%>%filter(group == "ICT-ICT.TKI")
+ICT.TMZ <- select.ict2o.wilcox.0.05.a%>%filter(group == "ICT-ICT.TMZ")
+
+ICT.BRAF <- ICT.BRAF[out.hclust$order, ]
+ICT.PTX <- ICT.PTX[out.hclust$order, ]
+ICT.TKI <- ICT.TKI[out.hclust$order, ]
+ICT.TMZ <- ICT.TMZ[out.hclust$order, ]
+# 
+# 
+annotation = HeatmapAnnotation("ICT.TMZ_P" = anno_points(value, axis = F, pch = sig(ICT.TMZ$sig_FDR),size = unit(5, "mm"),axis_param = NULL,border=FALSE,show_annotation_name = FALSE,ylim=c(0,1),gp = gpar(fill = ifelse(ICT.TMZ$sig_FDR=="**"|ICT.TMZ$sig_FDR=="***"|ICT.TMZ$sig_FDR=="****", "#207f4c", ifelse(ICT.TMZ$sig_FDR=="*","#8cc269", "#f1f0ed")))),
+                               "ICT.TKI_P" = anno_points(value, axis = F, pch = sig(ICT.TKI$sig_FDR),size = unit(5, "mm"),axis_param = NULL,border=FALSE,show_annotation_name = FALSE,ylim=c(0,1),gp = gpar(fill = ifelse(ICT.TKI$sig_FDR=="**"|ICT.TKI$sig_FDR=="***"|ICT.TKI$sig_FDR=="****", "#207f4c", ifelse(ICT.TKI$sig_FDR=="*","#8cc269", "#f1f0ed")))),
+                               "ICT.PTX_P" = anno_points(value, axis = F, pch = sig(ICT.PTX$sig_FDR),size = unit(5, "mm"),axis_param = NULL,border=FALSE,show_annotation_name = FALSE,ylim=c(0,1),gp = gpar(fill = ifelse(ICT.PTX$sig_FDR=="**"|ICT.PTX$sig_FDR=="***"|ICT.PTX$sig_FDR=="****", "#207f4c", ifelse(ICT.PTX$sig_FDR=="*","#8cc269", "#f1f0ed")))),
+
+                               "ICT.BRAF_P" = anno_points(value, axis = F, pch = sig(ICT.BRAF$sig_FDR),size = unit(5, "mm"),axis_param = NULL,border=FALSE,show_annotation_name = FALSE,ylim=c(0,1),gp = gpar(fill = ifelse(ICT.BRAF$sig_FDR=="**"|ICT.BRAF$sig_FDR=="***"|ICT.BRAF$sig_FDR=="****", "#207f4c", ifelse(ICT.BRAF$sig_FDR=="*","#8cc269", "#f1f0ed")))))
+
+sum.g5.median.matrix <- sum.g5.median.matrix[,rev(sort(colnames(sum.g5.median.matrix)))] # 排序
+
+# # plot
+if (do.write){
+  pdf("../Result/03.Comparison/S50/bmc.sum.g5.BE2.w.diff.P_0.05_heatmap.pdf", width = 18, height = 5.5)
+}
+
+dat <- t(sum.g5.median.matrix[,c(1,2,4,6,8)])
+rownames(dat) <- c("ICT","ICT.TMZ","ICT.TKI","ICT.PTX","ICT.BRAF")
+ph1 <- Heatmap(dat, cluster_rows = F, cluster_columns = F, rect_gp = gpar(col = "grey50", lwd = 1),bottom_annotation = annotation, row_gap = unit(4, "mm"), heatmap_legend_param = list(title = ""))
+#Heatmap(t(sum.g5.median.matrix), cluster_rows = F, cluster_columns = T, bottom_annotation = annotation, col = c("#d7191c", "#fdae61","#ffffbf","#a6d96a", "#1a9641"))
+#Heatmap(t(sum.g5.median.matrix), cluster_rows = F, cluster_columns = T, bottom_annotation = annotation, col = c("#a6611a", "#dfc27d","#f5f5f5","#80cdc1", "#018571"))
+if (do.write){
+  dev.off()
+}
+```
+
+
+
+
+```{r, running = FALSE}
+## plot3
+
+annotation_ICT.BRAF = rowAnnotation("ICT.BRAF_P" = anno_points(value, axis = F, pch = sig(ICT.BRAF$sig_FDR),size = unit(3, "mm"),axis_param = NULL,border=FALSE,show_annotation_name = FALSE,ylim=c(0,1.5),gp = gpar(fill = ifelse(ICT.BRAF$sig_FDR=="**"|ICT.BRAF$sig_FDR=="***"|ICT.BRAF$sig_FDR=="****", "#207f4c", ifelse(ICT.BRAF$sig_FDR=="*","#8cc269", "#f1f0ed")))))
+annotation_ICT.PTX = rowAnnotation("ICT.PTX_P" = anno_points(value, axis = F, pch = sig(ICT.PTX$sig_FDR),size = unit(3, "mm"),axis_param = NULL,border=FALSE,show_annotation_name = FALSE,ylim=c(0,1.5),gp = gpar(fill = ifelse(ICT.PTX$sig_FDR=="**"|ICT.PTX$sig_FDR=="***"|ICT.PTX$sig_FDR=="****", "#207f4c", ifelse(ICT.PTX$sig_FDR=="*","#8cc269", "#f1f0ed")))))
+annotation_ICT.TKI = rowAnnotation("ICT.TKI_P" = anno_points(value, axis = F, pch = sig(ICT.TKI$sig_FDR),size = unit(3, "mm"),axis_param = NULL,border=FALSE,show_annotation_name = FALSE,ylim=c(0,1.5),gp = gpar(fill = ifelse(ICT.TKI$sig_FDR=="**"|ICT.TKI$sig_FDR=="***"|ICT.TKI$sig_FDR=="****", "#207f4c", ifelse(ICT.TKI$sig_FDR=="*","#8cc269", "#f1f0ed")))))
+annotation_ICT.TMZ = rowAnnotation("ICT.TMZ_P" = anno_points(value, axis = F, pch = sig(ICT.TMZ$sig_FDR),size = unit(3, "mm"),axis_param = NULL,border=FALSE,show_annotation_name = FALSE,ylim=c(0,1.5),gp = gpar(fill = ifelse(ICT.TMZ$sig_FDR=="**"|ICT.TMZ$sig_FDR=="***"|ICT.TMZ$sig_FDR=="****", "#207f4c", ifelse(ICT.TMZ$sig_FDR=="*","#8cc269", "#f1f0ed")))))
+
+sum.g5.median.matrix
+p.ict.tm <- Heatmap(sum.g5.median.matrix[,c(1,2)], cluster_rows = F, cluster_columns = F, right_annotation = annotation_ICT.TMZ, row_names_gp = gpar(fontsize = 8))
+
+p.ict.p <- Heatmap(sum.g5.median.matrix[,c(5,6)], cluster_rows = F, cluster_columns = F, right_annotation = annotation_ICT.PTX, row_labels = rep("", dim(sum.g5.median.matrix)[1]),show_heatmap_legend = FALSE)
+
+p.ict.b <- Heatmap(sum.g5.median.matrix[,c(7,8)], cluster_rows = F, cluster_columns = F, right_annotation = annotation_ICT.BRAF,row_labels = rep("", dim(sum.g5.median.matrix)[1]),show_heatmap_legend = FALSE)
+
+p.ict.t <- Heatmap(sum.g5.median.matrix[,c(3,4)], cluster_rows = F, cluster_columns = F, right_annotation = annotation_ICT.TKI,row_labels = rep("", dim(sum.g5.median.matrix)[1]),show_heatmap_legend = FALSE)
+
+
+
+# plot
+if (do.write){
+  pdf("../Result/03.Comparison/S50/bmc.sum.g5.BE2.w.diff.P_0.05_heatmap2.pdf", width = 5.5, height = 9)
+}
+
+p.ict.b + p.ict.p + p.ict.t + p.ict.tm
+
+if (do.write){
+  dev.off()
+}
+
+
+
+```
+
+
+
+
+
+The results are in the directory: https://bgitech.sharepoint.com/:f:/s/tumor_meta/Eib03DzYvsJFhivt3LKUd3QBoXTDgjmBzWHhBimyzkZOkA?e=qr8Ihf]

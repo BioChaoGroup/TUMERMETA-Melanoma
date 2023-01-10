@@ -1,0 +1,156 @@
+---
+title: "Community composition_mgs"
+author: "pengzhuobing"
+date: "2021/5/31"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load fucntions
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(pheatmap)
+library(plyr)
+library(RColorBrewer)
+library(patchwork)
+library(optmatch)
+library(ggsignif)
+library(ggpubr)
+library(psych)
+library(vegan) 
+library(ape)
+library(dendextend) #进化树相关包
+
+source("../TEST.functions.R") #这里加载写好的功能，后面用到的ttFun，tkFun
+source("../common.R")
+do.write <- T
+load("../../Result/01.Profile/phe1.RData")
+load("../../Result/01.Profile/relDaysgroups.RData")
+load("../../Result/04.Globalview/g2g.compare.RData")
+load("../../Result/04.Globalview/3.Permanova/gene.genus.mgs.79.bray.dist.RData")
+color_heatmap_bule_red <- c("gray","#bd2113","#e3460c","#f07701","#f59525","#fccbb8","#f5e13a","#a3e2e1","#6ab7e1","#4f74bb","#472497") 
+
+phe <- phe.210701
+phe$c2s <- "same"
+phe[which(phe$Patient.ID%in%diff2sam),"c2s"] <- "diff"
+```
+
+
+
+# 样本间的进化关系
+```{r}
+# load mgs.prf
+prf <- read.table("../../Result/02.gene2MGS/IGC.mgs.79.abundance.profile.txt", sep = "\t", row.names = 1, header = T)
+prf <- prf[rowSums(prf)!=0,]
+
+# trans to relative aboundance
+prf <- prf/1000000  # total gene aboundance is 1000000
+#for (i in 1:dim(prf)[2]){
+#  rog5 = sum(prf[,i])
+#  for (j in 1:dim(prf)[1]){
+#    prf[j,i] <- prf[j,i]/rog5
+#  }
+#}
+
+# mgs.annotation
+mgs.V2.anno <- read.table("../../Result/01.Profile/00.IGC.MGS.annotation",sep="\t",header=T) 
+mgs.V2.anno$mgs.V2 <- sub(":",".",mgs.V2.anno$X)
+mgs.V2.anno2 <- mgs.V2.anno[,c(8,2,3)]
+
+#自定义显著性标记函数，此处显著性标记使用“*”
+sig_label<-function(x){ifelse(x<0.001&x>0,"***",ifelse(x<0.01,"**",ifelse(x<0.05,"*","")))}
+sig <- function(x){ifelse(x=="**", 23, ifelse(x=="*", 23, 21))}
+#cols <- function(x){ifelse(x=="**", "3", ifelse(x=="*", "3", "2"))}
+
+```
+
+
+## 查看样品进化关系，看看什么分组会使其分到一组
+```{r}
+dend <- as.dendrogram(hclust(as.dist(mgs.bray.dist)))
+type <- factor(phe$Treatment_type)
+cols <- colorspace::rainbow_hcl(length(unique(phe$Treatment_type)), c=70, l=50) 
+colors_to_use <- cols[type]
+labels_colors(dend) <- colors_to_use
+plot(dend)
+
+```
+由图可知， 红色ICT部分聚在一起，蓝色和绿色混在一起看不出来
+
+## mgs
+```{r}
+a.mgs.dat <- prf
+a.mgs.dat$mgs.V2 <- factor(rownames(a.mgs.dat), levels = rownames(a.mgs.dat))
+a.mgs.dat <- melt(a.mgs.dat, id = 'mgs.V2')
+names(a.mgs.dat)[2] <-'sample'
+a.mgs.dat <- merge(a.mgs.dat, phe, by.x="sample", by.y="Fecal.sample.name")
+```
+
+```{r}
+s.a.mgs.dat <- a.mgs.dat%>%filter(sample_order=="1"|sample_order=="2")
+
+dat <- s.a.mgs.dat[,c("Patient.ID","sample_order","mgs.V2","value")]
+dat <- dcast(dat, Patient.ID+mgs.V2~sample_order)
+dat$diff2_1 <- dat$`2`-dat$`1`
+dat <- left_join(dat,unique(s.a.mgs.dat[,c("Patient.ID","c2s","BE2")]), by="Patient.ID")
+
+```
+
+
+```{r}
+
+rem0genus <- unique(s.a.mgs.dat[which(s.a.mgs.dat$value>0.01),"mgs.V2"])
+
+# 计算mgs对应值的中位数
+tmpmgs <- c()
+for (i in levels(dat$mgs.V2)){
+  tmp <- dat%>%filter(mgs.V2==i)
+  if(median(tmp$diff2_1)>1e-07){ # 筛选中位数大于1e-07的mgs
+    tmpmgs <- append(tmpmgs, i)
+  }
+}
+
+#%>%filter(BE2=="NR")
+ggplot(dat%>%filter(mgs.V2%in%tmpmgs), aes(x=c2s, y=abs(diff2_1), fill=c2s))+geom_boxplot()+stat_compare_means()+geom_point()+xlab("")+ylab("Relative abundance difference(sample2-sample1)")
+
+ggplot(dat%>%filter(mgs.V2%in%tmpmgs), aes(x=mgs.V2, y=abs(diff2_1), fill=c2s))+geom_boxplot()+stat_compare_means(label="p.signif")+xlab("")+ylab("Relative abundance difference(sample2-sample1)")+theme_classic()+theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+```
+
+## 计算差异mgs,然后利用差异mgs绘制柱状图，但是需要注意的是，这里的丰度差异应该与原有丰度相结合
+
+比如mgs1，原有丰度就很低，那么丰度差也很小；而mgs2丰度高，那么丰度差也会比较大
+
+
+## 比较ICT 和ICT+ 之间特定物种差异
+
+```{r}
+ICT.1 <- a.mgs.dat[which(a.mgs.dat$Group=="ICT"),"Patient.ID"]
+ICT.1.mgs.dat <- a.mgs.dat%>%filter(Patient.ID%in%ICT.1)
+ICT.1.mgs.dat$group <- "ICT"
+ICT.1.mgs.dat[which(ICT.1.mgs.dat$Group!="ICT"),"group"] <- "ICT+"
+```
+
+
+```{r}
+ggplot(data = ICT.1.mgs.dat%>%filter(c2s=="diff"), aes(x=group, y=value)) + geom_boxplot(aes(fill=group))+ stat_compare_means(aes(group= group),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~mgs.V2)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray")
+```
+
+
+```{r}
+diff.ICT.1.mgs.dat <- ICT.1.mgs.dat%>%filter(c2s=="diff")
+
+xdat <- diff.ICT.1.mgs.dat[,c("Patient.ID","group","mgs.V2","value")]
+xdat <- dcast(xdat, Patient.ID+mgs.V2~group,value.var="value")
+dat$diff2_1 <- dat$ICT-dat$`ICT+`
+dat <- left_join(dat,unique(s.a.mgs.dat[,c("Patient.ID","BE2")]), by="Patient.ID")
+```
+
+
+
+# Fin.

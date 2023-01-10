@@ -1,0 +1,4 @@
+*.Rhistory
+*.html
+*.RData
+Result/

@@ -1,0 +1,321 @@
+---
+title: "data statistics"
+author: "pengzhuobing"
+date: "2021/3/16"
+update: "2021/7/1"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load fucntions
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(pheatmap)
+library(plyr)
+library(RColorBrewer)
+library(patchwork)
+library(optmatch)
+library(ggsignif)
+library(ggpubr)
+library(psych)
+library(vegan) 
+library(ape)
+
+source("./TEST.functions.R") #这里加载写好的功能，后面用到的ttFun，tkFun
+source("./common.R")
+do.write <- F
+load("../Result/04.Globalview/g2g.compare.RData")
+load("../Result/01.Profile/relDaysgroups.RData")
+load("../Result/04.Globalview/3.Permanova/gene.genus.mgs.79.bray.dist.RData")
+color_heatmap_bule_red <- c("#7E1712","#bd2113","#e3460c","#f07701","#f59525","#fccbb8","#f5e13a","#a3e2e1","#6ab7e1","#4f74bb","#472497") 
+
+```
+
+
+## 受试者表型分析
+```{r, warning=FALSE}
+
+#phenotype
+#load("../Result/01.Profile/phe.RData")
+#phe <- phe.210616
+
+load("../Result/01.Profile/phe1.RData")
+phe <- phe.210701
+
+phe$Sample.collection.time <-  as.Date(phe$Sample.collection.time, format = "%Y/%m/%d")
+#phe$Sampling.pre.post.treatment.w. <- as.numeric(phe$Sampling.pre.post.treatment.w.)
+phe$Sampling.post.treatment.w. <- as.numeric(phe$Sampling.post.treatment.w.)
+#phe$First_Treatment.duration <- as.Date(phe$First_Treatment.duration, format = "%Y/%m/%d")
+#phe$First_Treatment.duration <- as.Date(phe$First_Treatment.duration, format = "%Y/%m/%d")
+#phe$Sampling.post.treatment.w. <- phe$Sample.collection.time-phe$First_Treatment.duration
+#phe$Sampling.post.treatment.w. <- as.numeric(phe$Sampling.post.treatment.w.)
+phe$Antibiotic <- ifelse(phe$Antibiotic.use=="No","No","Yes")
+
+
+fp <- phe%>%filter(sample_order!="2"&sample_order!="3")
+fp <- fp[order(fp$Sampling.post.treatment.w.),]
+phe$Patient.ID <- factor(phe$Patient.ID, levels=rev(fp$Patient.ID))
+
+fp <- fp[order(fp$Drug_type),]
+phe$Patient.ID <- factor(phe$Patient.ID, levels=rev(fp$Patient.ID))
+
+p10 <- ggplot(phe, aes(x=Sampling.post.treatment.w., y=Patient.ID, color =Drug_type, shape =  BE2)) + theme(axis.text.x = element_text(angle = 30, hjust = 1)) +geom_point(size = 3) + geom_line(aes(group=Patient.ID), linetype="dashed", col="black") +theme_bw() + 
+  xlab("Weeks relative to initiation of treatment") + ylab("Patient ID")
+
+p10
+
+if(do.write){
+  ggsave(p10, filename = "../Result/04.Globalview/sampleInfo/g10.sample.stat.BE2.210701.pdf",width = 7, height = 8)
+}
+
+# 样本排序
+fp <- fp[order(fp$Sampling.post.treatment.w.),]
+phe$Patient.ID <- factor(phe$Patient.ID, levels=rev(fp$Patient.ID))
+
+fp <- fp[order(fp$Group),]
+phe$Patient.ID <- factor(phe$Patient.ID, levels=rev(fp$Patient.ID))
+p5 <- ggplot(phe, aes(x=Sampling.post.treatment.w., y=Patient.ID, color = BE2, shape=Group))+ theme(axis.text.x = element_text(angle = 30, hjust = 1)) +
+  geom_point(size = 3) + geom_line(aes(group=Patient.ID), linetype="dashed", col="black")  + 
+  xlab("Weeks relative to initiation of treatment") + ylab("Patient ID")+theme_bw()
+p5
+# geom_line(aes(group=Patient.ID), linetype="dashed")
+if(do.write){
+  #ggsave(p5, filename = "../Result/04.Globalview/sampleInfo/g5.sample.stat.BE2.pdf",width = 7, height = 8)
+  ggsave(p5, filename = "../Result/04.Globalview/sampleInfo/g5.sample.stat.BE2.210704.pdf",width = 7, height = 8)
+}
+
+```
+
+
+根据上图可知，取样时间相对于首次治疗时间主要分布在0-100w之间，这里需要注意疗效是否跟相对取样时间有关？
+这边筛选取样时将在0-100w将未变化治疗方法的样本先拿出来看看是否有差异
+
+
+```{r}
+rephe <- phe
+rephe$Sampling.post.treatment.w.1 <- rephe$Sampling.post.treatment.w.
+rephe$Sampling.post.treatment.w.1<- ifelse(rephe$Sampling.post.treatment.w.1<25,"0-25",ifelse(rephe$Sampling.post.treatment.w.1<50,"25-50",ifelse(rephe$Sampling.post.treatment.w.1 <75,"50-75",ifelse(rephe$Sampling.post.treatment.w.1 <100,"75-100",">100"))))
+
+rephe$Sampling.post.treatment.w.1 <- factor(rephe$Sampling.post.treatment.w.1, levels=c("0-25","25-50","50-75","75-100",">100"))
+
+ggplot(rephe%>%filter(Sampling.post.treatment.w.1!="NA"), aes(x=Sampling.post.treatment.w.1)) + geom_bar()+theme_bw() + xlab("Weeks relative to initiation of treatment")
+
+```
+查看相对取样天数的分布
+
+
+```{r}
+ggplot(rephe, aes(y=Sampling.post.treatment.w., x = Treatment_type)) + geom_boxplot() + stat_compare_means(comparisons=compare_g3,label = "p.format",method = "wilcox.test",size=3)+theme_bw()
+ggplot(rephe, aes(y=Sampling.post.treatment.w., x = Treatment_type)) + geom_boxplot() + stat_compare_means(comparisons=compare_g3,label = "p.format",method = "wilcox.test",size=3) + facet_grid(rephe$BE2)+theme_bw()
+```
+由A图可知，ICT与ICT/Chemo,ICT/Target组样本相对取样时间有显著差异，其中ICT组相对取样时间长于另外两组；
+由B图可知，ICT组内PR样本相对取样时间显著高于ICT组SD_PD组及其他两组；
+ICT组PR样本可能是由于取样导致的？ 因为ICT组相对取样时间长于另外两组，所以PR样本较多
+为验证这个猜想
+
+```{r}
+ggplot(rephe, aes(y=Sampling.post.treatment.w., x = BE2, fill=BE2)) + geom_boxplot() + stat_compare_means(label = "p.format") + facet_grid(rephe$Group)+theme_bw()+ylab("Sampling time(week)")
+
+ggplot(rephe%>%filter(Group=="ICT"), aes(y=Sampling.post.treatment.w., x = BE2, fill=BE2)) + geom_boxplot() + stat_compare_means(label = "p.format") +theme_bw()+ylab("Sampling time(week)")+xlab("ICT")
+```
+
+
+
+## 判断同一病人第一次和第二次取样之间的取样时间差异
+
+```{r}
+phe.210701$c2s <- "same"
+phe.210701[phe.210701$Patient.ID%in%diff2sam,"c2s"] <- "diff"
+dat <- phe.210701[which(phe.210701$sample_order==1|phe.210701$sample_order=="2"),c("Patient.ID","sample_order","Sampling.post.treatment.w.")]
+dat <- dcast(dat, Patient.ID~sample_order)
+dat$diff2_1 <- dat$`2`-dat$`1`
+dat <- left_join(dat,unique(phe.210701[,c("Patient.ID","c2s","BE2")]), by="Patient.ID")
+
+ggplot(data = phe.210701%>%filter(sample_order=="1"|sample_order=="2"), aes(x=sample_order, y=Sampling.post.treatment.w.)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')
+```
+
+
+```{r}
+ggplot(phe.210701%>%filter(sample_order=="1"|sample_order=="2"), aes(x=c2s, y=Sampling.post.treatment.w., fill=sample_order)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group=sample_order),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')
+
+
+pc2s <- ggplot(phe.210701%>%filter(sample_order=="1"|sample_order=="2"), aes(x=c2s, y=Sampling.post.treatment.w.)) + geom_boxplot(aes(fill=c2s))+ stat_compare_means(aes(group=c2s),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')
+
+pc2s
+
+if(do.write){
+  ggsave(pc2s, width = 4, height = 4, filename = "../Result/04.Globalview/sampleInfo/diff_same_sampling.post.treatment.w.boxplot.pdf")
+}
+
+ggplot(phe.210701%>%filter(sample_order=="1"|sample_order=="2"), aes(x=sample_order, y=Sampling.post.treatment.w., fill=c2s)) + geom_boxplot(aes(fill=c2s))+ stat_compare_means(aes(group=c2s),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')+plot_layout(nrow = 2)
+```
+第二次取样时间明显长于第一次取样时间，第一次取样和第二次取样不能做比较，第二次取样高于第一次是肯定的
+
+但是diff和same组无明显差异，两两之间可以做比较
+
+## diff组两次取样的时间差和same组时间差有显著差异,其中NR组提供了主要的差异
+```{r}
+dat <- phe.210701%>%filter(sample_order=="1"|sample_order=="2")
+dat <- dat[,c("Patient.ID","sample_order","c2s","Sampling.post.treatment.w.")]
+dat <- dcast(dat, Patient.ID+c2s~sample_order)
+dat$t2.1 <- dat$`2`-dat$`1`
+dat <- left_join(dat, unique(phe.210701[,c("Patient.ID","BE2")]), by="Patient.ID")
+
+pt <-  ggplot(dat%>%filter(Patient.ID!="P-057"), aes(x=c2s, y=t2.1)) + geom_boxplot(aes(fill=c2s))+ stat_compare_means(aes(group= c2s),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',y="Time difference (same patient(s2-s1))", title='')+
+ggplot(dat%>%filter(Patient.ID!="P-057"), aes(x=BE2, y=t2.1,fill=c2s)) + geom_boxplot(aes(fill=c2s))+ stat_compare_means(aes(group= c2s),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',y="Time difference (same patient(s2-s1))", title='')
+
+pt
+if(do.write){
+  ggsave(pt, width = 10, height = 5, filename = "../Result/04.Globalview/sampleInfo/diff_same.R_NR.s2_s1.sampling.post.treatment.w.boxplot.pdf")
+}
+```
+diff组取样时间差比same组取样时间差显著较大；
+1. 或许可以得出一个结论：时间越长，肠菌差异越大
+2. 说明diff组差异较大时需要注意这个问题
+
+
+## 判断取样间隔时间和疗效的相关性
+
+```{r}
+tt <- rephe
+tt$BE2 <- ifelse(tt$BE2=="R",1,2) # 1-PR, 2-PD_SD
+cor.test(tt$BE2, tt$Sampling.post.treatment.w.)
+
+t1 <- tt%>%filter(Group=="ICT")
+cor.test(t1$BE2, t1$Sampling.post.treatment.w.)
+
+```
+我们通过Point-biserial correlation coefficient对疗效及相对取样时间进行相关性分析
+上表可知ICT组别的疗效(R:NR)和相对治疗取样时间有显著相关性（PD样本的相对治疗取样时间较长），其他两组则没有强相关性。为了排除取样时间影响，这里查看ICT取样时间的cutoff
+
+
+# 查看ICT样本 取样时间的cutoff
+
+```{r}
+tt <- rephe%>%filter(Group=="ICT")
+
+tt$BE2 <- ifelse(tt$BE2=="R",1,2) # 1-PR, 2-PD_SD
+tt <- tt[order(tt$Sampling.post.treatment.w.),]
+tt <- tt%>%filter(Sampling.post.treatment.w.!="NA")
+tp <- tt[tt$Sampling.post.treatment.w.==unique(tt$Sampling.post.treatment.w.)[1:3],]
+ll <- data.frame()
+for (i in c(4:length(unique(tt$Sampling.post.treatment.w.)))){
+  tp <- rbind(tp, tt[tt$Sampling.post.treatment.w.==unique(tt$Sampling.post.treatment.w.)[i],])
+  pb.cor <- cor.test(tp$BE2, tp$Sampling.post.treatment.w.)
+  ll <- rbind(ll, cbind(unique(tt$Sampling.post.treatment.w.)[i], pb.cor$estimate, pb.cor$p.value))
+  #相关系数为负数说明BE2为1时，Sampling.post.treatment.w.倾向更高的值
+}
+
+names(ll) <- c("Weeks relative to initiation of treatment", "Point-biserial correlation coefficient", "p.value")
+ll$p.value <- ifelse(ll$p.value<0.05,"<0.05",">0.05")
+ggplot(ll, aes(x=`Weeks relative to initiation of treatment`, y=`Point-biserial correlation coefficient`))+
+  geom_point(aes(color=p.value))+geom_line(color="gray",linetype="dashed") + 
+  geom_hline(aes(yintercept=0),colour="black")+theme_bw()+xlab("Weeks relative to initiation of treatment(ICT)")
+
+
+# p.value > 0.05, 因此ICT组别中该相关在统计学上显著， 其他组无显著相关性
+
+```
+由上图可知，
+  
+  (√) 对于ICT 第一次显著的点（红色）在63周的位置, 可以以50周为cutoff，只取0-50周的样本做分析
+  
+  (×) 而对于所有样本，80周为cutoff，可以只取0-80周的样本，则一共只排除3个样本 
+
+
+将50周前和50周后的样本分组，通过PCA进一步探究两组之间是否有群落差异
+```{r}
+library(ggbiplot)         #https://github.com/vqv/ggbiplot 
+genus.prf <- read.table("../Result/01.Profile/genus.rela.abun.xls", sep = "\t", header = T, row.names = 1)
+genus.prf <- select(genus.prf, phe.210701$Fecal.sample.name)
+rownames(phe) <- phe$Fecal.sample.name
+phe$w.50 <- ifelse(phe$Sampling.post.treatment.w.>50, ">50w", "<50w")
+sel.pca <- calPCA(genus.prf,1,phe,"row.names")
+all.pca.dat <- sel.pca$dat
+all.pca.pc <- sel.pca$pc
+
+all.pca.dat$BE2 <- as.factor(all.pca.dat$BE2)
+ggbiplot(all.pca.pc, groups = all.pca.dat$BE2, ellipse = T, circle = T,var.axes=F)
+ggbiplot(all.pca.pc, groups = all.pca.dat$w.50, ellipse = T, circle = T,var.axes=F)
+
+```
+由上图可知，PCA1和PCA2的解释度仅仅10%，这里考虑到解释度过低，更换方法进行分析
+
+PCoA 分析
+```{r}
+library(ape)
+
+ict.p <- phe%>%filter(Group=="ICT")
+ict.genus.dist <- All.genus.79.bray.dist[ict.p$Fecal.sample.name, ict.p$Fecal.sample.name]
+pcoa_bray <- pcoa(ict.genus.dist) 
+pcoa_data <- data.frame(pcoa_bray$vectors[,1:2])
+colnames(pcoa_data) <- c("PCo1", "PCo2")
+eig <- pcoa_bray$value[,1]
+pc1 <- eig[1]/sum(eig)*100
+pc2 <- eig[2]/sum(eig)*100 
+pc1 <- paste0("PCo1(",round(pc1,2),"%)")
+pc2 <- paste0("PCo2(",round(pc2,2),"%)")
+
+### merge data frame
+rownames(phe) <- phe$Fecal.sample.name
+pcoa_data<-merge(pcoa_data, phe, by = "row.names")
+
+ggplot(pcoa_data,aes(x=PCo1,y=PCo2,color=w.50)) + geom_point() + stat_ellipse(aes(color=w.50)) + xlab(pc1)+ylab(pc2) 
+ggplot(pcoa_data,aes(x=PCo1,y=PCo2,color=BE2)) + geom_point() + stat_ellipse(aes(color=BE2)) + xlab(pc1)+ylab(pc2) 
+
+```
+
+
+使用PCoA查看物种分布是否和取样时间相关,由pcoa可知pco1,pco2解释度均高于10%，认为该结果可以作为参考
+由图可以看出，在ICT组，>50w和<50w似乎有差异
+
+>* 由以上可知，分析方案可以如下：
+      1. 仅仅ICT组保留 0-50w 的病人
+  (×) 2. 由PCoA可知，>80w 和 <80w 病人之间无显著分离，可以不剔除样本，那么需要医生证明收样时为什么ICT样本治疗初期没有收样
+
+## 输出筛选的样本
+  排除ICT>50w的样本
+```{r}
+diff2pat.g5 <- c("P-028","P-043","P-014", "P-027","P-001","P-064", "P-037", "P-010", "P-051")
+diff2sam.g5 <- c("P_028_2","P_043_2","P_014_2","P_014_3", "P_027_2","P_001_2","P_064_2", "P_037_2", "P_010_2", "P_051_2") # 为第二次治疗更换治疗方法的样本
+
+tmp <- rephe[which(rephe$Sampling.post.treatment.w.<=80),]
+fecn.w80 <- tmp$Fecal.sample.name
+
+tmp <- rephe[which(rephe$Sampling.post.treatment.w.<75),]
+fecn.w75 <- tmp$Fecal.sample.name
+
+exICT <- phe[phe$Sampling.post.treatment.w. > 50&phe$Group=="ICT",]
+tmp <- phe[-which(phe$Fecal.sample.name%in%exICT$Fecal.sample.name),]
+fecn.w50 <- tmp$Fecal.sample.name
+
+if(do.write){
+  save(diff2sam, diff2sam.g5, fecn.w80, fecn.w75, fecn.w50, file = "../Result/01.Profile/relDaysgroups.RData")
+}
+
+```
+根据80周, 75周, 50周的cutoff，排除相关样本，将其保存在"../Result/01.Profile/relDaysgroups.RData"中
+
+
+
+# 抗生素影响
+```{r}
+
+table(phe$Antibiotic,phe$BE2)
+
+am.phe <- read.table("../sampleInfo/Antibiotic.txt",header = T)
+am.phe$Sample.collection.time <-  as.Date(am.phe$Sample.collection.time, format = "%Y/%m/%d")
+
+ggplot(am.phe, aes(x=Sample.collection.time, y=Patient.ID, color = Drug_type, shape = Response.1)) +scale_x_date(date_breaks = "1 month") + theme(axis.text.x = element_text(angle = 30, hjust = 1)) +geom_point(size = 3) + geom_line(aes(group=Patient.ID), linetype="dashed", col="black")
+
+```
+>* 抗生素使用距离第一次采样时间都在2个月以上，并且使用、未使用抗生素对微生物没有影响，这里可以忽略抗生素影响
+
+
+## -------------------------------后续分析去除ICT>w50的样本，分析结果在Data_stat_analysis.Rmd--------------------------------------------------
+

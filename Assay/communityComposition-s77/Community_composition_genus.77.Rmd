@@ -1,0 +1,410 @@
+---
+title: "Community composition_genus"
+author: "pengzhuobing"
+date: "2021/5/31"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load fucntions
+library(ggplot2)
+library(dplyr)
+library(reshape2)
+library(pheatmap)
+library(plyr)
+library(RColorBrewer)
+library(patchwork)
+library(optmatch)
+library(ggsignif)
+library(ggpubr)
+library(psych)
+library(vegan) 
+library(ape)
+
+source("../TEST.functions.R") #这里加载写好的功能，后面用到的ttFun，tkFun
+source("../common.R")
+do.write <- T
+load("../../Result/04.Globalview/g2g.compare.RData")
+load("../../Result/04.Globalview/3.Permanova/gene.genus.mgs.79.bray.dist.RData")
+load("../../Result/01.Profile/phe1.RData")
+load("../../Result/01.Profile/relDaysgroups.RData")
+# color_heatmap_bule_red <- c("gray","#bd2113","#e3460c","#f07701","#f59525","#fccbb8","#f5e13a","#a3e2e1","#6ab7e1","#4f74bb","#472497") 
+color_heatmap_bule_red <- c("gray","#bd2113","#e3460c","#f07701","#f59525","#fccbb8","#f5e13a","#a3e2e1","#6ab7e1","#4f74bb","#472497") 
+```
+
+
+
+## 0.样本间的进化关系
+```{r}
+#phenotype
+phe <- phe.210701#%>%filter(Fecal.sample.name%in%fecn.w50) # 剔除样本
+phe$c2s <- "same"
+phe[which(phe$Patient.ID%in%diff2sam),"c2s"] <- "diff"
+
+# load mgs.prf
+prf <- read.table("../../Result/02.gene2MGS/IGC.mgs.79.abundance.profile.txt", sep = "\t", row.names = 1, header = T)
+prf <- prf[rowSums(prf)!=0,]
+
+# trans to relative aboundance
+prf <- prf/1000000  # total gene aboundance is 1000000
+#for (i in 1:dim(prf)[2]){
+#  rog5 = sum(prf[,i])
+#  for (j in 1:dim(prf)[1]){
+#    prf[j,i] <- prf[j,i]/rog5
+#  }
+#}
+
+# mgs.annotation
+mgs.V2.anno <- read.table("../../Result/01.Profile/00.IGC.MGS.annotation",sep="\t",header=T) 
+mgs.V2.anno$mgs.V2 <- sub(":",".",mgs.V2.anno$X)
+mgs.V2.anno2 <- mgs.V2.anno[,c(8,2,3)]
+
+#自定义显著性标记函数，此处显著性标记使用“*”
+sig_label<-function(x){ifelse(x<0.001&x>0,"***",ifelse(x<0.01,"**",ifelse(x<0.05,"*","")))}
+sig <- function(x){ifelse(x=="**", 23, ifelse(x=="*", 23, 21))}
+#cols <- function(x){ifelse(x=="**", "3", ifelse(x=="*", "3", "2"))}
+
+```
+
+
+```{r}
+phy.ab <- read.table("../../Result/01.Profile/phylum.rela.abun.xls", header = T, row.names = 1)
+genus.ab <- read.table("../../Result/01.Profile/genus.rela.abun.xls", header = T, row.names = 1)
+
+phy.bray <- read.table("../../Result/01.Profile/phylum_beta.matrix.xls", header = T, row.names = 1)
+genus.bray <- read.table("../../Result/01.Profile/genus_beta.matrix.xls", header = T, row.names = 1)
+
+genus.out.hclust=hclust(as.dist(genus.bray))
+phy.out.hclust=hclust(as.dist(phy.bray))
+
+plot(phy.out.hclust)
+plot(genus.out.hclust)
+```
+
+## 2. 物种组成分析(genus水平)
+
+### 2.1 分析所有受试者第一次取样样本
+```{r}
+genus.dat <-speAb_top10(genus.ab, "unknown")
+genus.dat$Taxonomy <- factor(rownames(genus.dat), levels = rownames(genus.dat))
+genus.dat <- melt(genus.dat, id = 'Taxonomy')
+names(genus.dat)[2] <-'sample'
+genus.dat <- merge(genus.dat, phe, by.x="sample", by.y="Fecal.sample.name")
+
+## 通过取样时间对样本排序来看物种组成
+genus.dat <- genus.dat[order(genus.dat[,"Sampling.post.treatment.w."]),]
+genus.dat$sample <- factor(genus.dat$sample, levels=unique(genus.dat$sample))
+genus.dat$Patient.ID <- factor(genus.dat$Patient.ID, levels=unique(genus.dat$Patient.ID))
+
+# 通过治疗分组分开看各组样本的物种分布,根据样本取样时间进行排序 #根据丰度最高的物种从小到大排序
+f.genus.dat <- genus.dat%>%filter(sample_order=="1"|sample_order=="-")
+
+p.top10.genus <- ggplot(f.genus.dat, aes(sample, value, fill = Taxonomy)) + 
+  geom_col(position = 'stack', width = 0.8) + xlab("")+
+  theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 90))+
+  scale_fill_manual("Top10 of Genus", values = color_heatmap_bule_red)+facet_grid(~Group, scales = 'free_x',space = "free")
+
+p.top10.genus
+
+if(do.write){
+  ggsave(p.top10.genus,width = 10, height = 5, filename = "../../Result/04.Globalview/4.composition/S50.genus.top10.composition.barplot.pdf")
+}
+
+```
+由上图可知，
+  总体来看 - 属水平top10物种并没有随着取样时间增加有明显变化趋势
+  分组来看 - 在ICT.TMZ组中Bacterioides似乎有趋势是随着时间逐渐上升，但P024病人除外
+
+以下通过单个菌细看
+```{r}
+ggplot(f.genus.dat, aes(Sampling.post.treatment.w.,value))+geom_point()+facet_grid(Taxonomy~., scales = 'free_y',space = "free")+geom_smooth(method=lm)
+
+p.top10.genus.2 <- ggplot(f.genus.dat%>%filter(Taxonomy!="other"), aes(Group,value))+
+  geom_boxplot(aes(fill=Group))+geom_point()+stat_compare_means(label="p.format")+
+  theme_bw()+
+  theme(axis.text.x = element_text(angle = 45,hjust=1)) +
+  facet_wrap(~Taxonomy, ncol=5)+scale_y_log10()#
+p.top10.genus.2
+
+if(do.write){
+  ggsave(p.top10.genus.2,width = 8, height = 5, filename = "../../Result/04.Globalview/4.composition/S50.genus.top10.composition.boxplot.pdf")
+}
+```
+>* 主要是Bacteroides,Prevotella, Escherichia菌为优势菌
+>* Roseburia菌在五组中有显著差异，主要在ICT.TKI组中丰度较高
+
+```{r}
+ggplot(f.genus.dat%>%filter(Taxonomy=="Roseburia"), aes(Group,value))+geom_boxplot(aes(fill=Group))+geom_point()+stat_compare_means()+scale_y_log10()
+
+p.genus.Rose <- ggplot(f.genus.dat%>%filter(Taxonomy=="Roseburia"&Sampling.post.treatment.w.<=50), aes(Sampling.post.treatment.w.,value))+geom_point(aes(color=Group))+geom_smooth(method=lm,aes(color=Group))+scale_y_log10()
+p.genus.Rose
+
+if(do.write){
+  ggsave(p.genus.Rose,width = 5, height = 5, filename = "../../Result/04.Globalview/4.composition/S50.genus.Roseburia.change.point.pdf")
+}
+```
+用ICT-> ICT.TKI病人验证这个属的变化 P_064_1， P_064_2验证Roseburia属变化; 与结果相反，在ICT中丰度高，在ICT.TKI中丰度低
+```{r}
+ggplot(genus.dat%>%filter(Taxonomy=="Roseburia"&Patient.ID=="P-064"), aes(Sampling.post.treatment.w.,value))+geom_point(aes(color=Group))+geom_smooth(method=lm)+scale_y_log10()
+```
+
+
+#### 查看优势菌随时间变化趋势
+```{r}
+## 查看Bacteroides在各组中随时间变化趋势
+ggplot(f.genus.dat%>%filter(Taxonomy=="Bacteroides"), aes(Sampling.post.treatment.w.,value))+geom_point(aes(color=Group))+geom_smooth(method=lm,aes(color=Group))+scale_y_log10()
+## 查看Bacteroides在五组间差异
+ggplot(f.genus.dat%>%filter(Taxonomy=="Bacteroides"), aes(Group,value))+geom_boxplot(aes(fill=Group))+geom_point()+stat_compare_means()
+
+```
+
+
+```{r}
+## Prevotella
+ggplot(f.genus.dat%>%filter(Taxonomy=="Prevotella"), aes(Sampling.post.treatment.w.,value))+geom_point(aes(color=Group))+geom_smooth(method=lm,aes(color=Group))+scale_y_log10()
+## Prevotella
+ggplot(f.genus.dat%>%filter(Taxonomy=="Prevotella"), aes(Group,value))+geom_boxplot(aes(fill=Group))+geom_point()+stat_compare_means()+scale_y_log10()
+```
+Prevotella丰度
+      在五组分组中无显著差异
+      在五组样本中均随采样时间有下降趋势
+              
+
+```{r}
+## Escherichia
+ggplot(f.genus.dat%>%filter(Taxonomy=="Escherichia"), aes(Group,value))+geom_boxplot(aes(fill=Group))+geom_point()+stat_compare_means()+scale_y_log10()
+## Escherichia
+ggplot(f.genus.dat%>%filter(Taxonomy=="Escherichia"), aes(Sampling.post.treatment.w.,value))+geom_point(aes(color=Group))+geom_smooth(method=lm,aes(color=Group))+scale_y_log10()
+
+```
+Escherichia
+      在五组分组中无显著差异
+      在五组样本中随采样时间有上升趋势（除ICT.PTX）
+
+#### 查看分组/亚组对组内差异的影响
+1. 治疗组
+```{r}
+ggplot(f.genus.dat, aes(sample, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 90))+ scale_fill_manual("Top10 of Genus", values = color_heatmap_bule_red)+facet_grid(~Group, scales = 'free_x',space = "free")
+```
+查看四组中首次取样的样本，本图可知
+    ICT组组内样本差异较大， 其他组样本差异较小，组与组间看不出太大的差距
+
+2. 疗效组
+```{r}
+ggplot(f.genus.dat, aes(sample, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 90))+ scale_fill_manual("Top10 of Genus", values = color_heatmap_bule_red)+facet_grid(~BE2, scales = 'free_x', space = "free")
+
+ggplot(f.genus.dat, aes(sample, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 90))+ scale_fill_manual("Top10 of Genus", values = color_heatmap_bule_red)+facet_wrap(Group~BE2, scales = 'free_x',nrow = 2)
+```
+
+由以上可知，组内样本与样本之间差异较大，这边可以看下beta多样性，若组内样本与样本之间差异过大，是否是因为分组错误？
+这种情况就需要baseline的数据来看，是否是因为治疗前各样本本来差异就很大
+
+但是这仅仅是genus水平top10的物种情况，可以看看其他水平物种情况
+
+
+#### 分析有baseline的样本(P017, P020)
+```{r}
+ggplot(genus.dat%>%filter(Patient.ID=="P-017" | Patient.ID=="P-020"), aes(sample, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 90))+ scale_fill_manual("Top10 of Genus", values = color_heatmap_bule_red)
+
+```
+由上图可知，-1为baseline样本，样品与样品之间差异较大，但这仅仅是genus top10 的物种分布
+
+
+
+### 2.2 通过两次取样人群进行验证
+#### > 查看全部受试者第一次取样和第二次取样之间的物种组成
+```{r}
+s.genus.dat <- genus.dat%>%filter(sample_order=="1"|sample_order=="2") # 两次取样受试者
+
+## 筛选取了两个样品的受试者，查看两次取样差异,按取样时间排序
+ggplot(s.genus.dat, aes(sample_order, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 90))+ scale_fill_manual("Top10 of Genus", values = color_heatmap_bule_red)+facet_grid(~Patient.ID)
+```
+根据取样时间进行样本排序，由图可知，
+    同一样本不同取样物种差别较小！需查看同一受试者不同样本之间相关性？
+    样本与样本之间的差别更大
+    
+    >* 细看可知改变疗法的患者前后两次样本之间某些物种差异较大
+
+需要分析查看样本与样本之间的差异是什么原因造成的 1.治疗组 2.疗效组 3...
+
+
+#### > 查看全部受试者第一次取样和第二次取样之间的相关性
+```{r}
+
+## 查看全部受试者第一次取样和第二次取样之间的相关性
+tmpdat <- s.genus.dat
+tmpdat$sample_order <- ifelse(tmpdat$sample_order=="1",1,2)
+cor.test(tmpdat$sample_order, tmpdat$value)
+
+
+## 查看同一受试者两次取样样本之间的相关性 ------------------------------waiting for check test method (明天组会问下方师傅) ------------------------
+# s2s <- as.data.frame(table(genus.dat$Patient.ID))
+# s2s.s <- s2s%>%filter(Freq=="22")
+# 
+# for(i in c(1:dim(s2s.s[1])[1])){
+#   tmpdat <- genus.dat%>%filter(Patient.ID==s2s.s[i,1])
+#   tmpdat$sample_order <- ifelse(tmpdat$sample_order=="1",1,2)
+#   pb.cor <- cor.test(tmpdat$sample_order, tmpdat$value)
+#   if(pb.cor$p.value<0.05){
+#     print(i)
+#   }
+# }
+
+
+```
+
+
+### 2.3 改变治疗方法的样本：未改变治方法的样本
+
+```{r}
+s.genus.dat$c2s <- "same"
+s.genus.dat[s.genus.dat$Patient.ID%in%diff2sam,"c2s"] <- "diff"
+
+ggplot(s.genus.dat, aes(sample_order, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 90))+ scale_fill_manual("Top10 of Genus", values = color_heatmap_bule_red)+facet_wrap(c2s~Patient.ID, ncol=9)
+```
+由图可知：
+    1. 改变治疗方法的样本间物种差异似乎较大，未改变治方法的样本间物种差异似乎较小
+    2. 在diff组别中，样本P-037(ICT -> ICT.PTX)，P-064(ICT -> ICT.TKI) 在取样前后Bacteroides菌丰度上升，而其他样本Bacteroides菌丰度下降
+
+由此，以下先分析改变疗法对群落的影响，然后在细看单个或者多个菌的影响，然后在细看不同疗法的作用（有必要的话）
+
+#### 2.3.1 分析两组之间alpha多样性差异
+>* 查看Alpha.79.genus_phylum.Rmd文件
+
+#### 2.3.2 分析两组之间的beta多样性
+>* 查看Beta*Rmd文件
+
+#### 2.3.3 成对分析top10 genus差值丰度
+```{r}
+dat <- s.genus.dat[,c("Patient.ID","Taxonomy","sample_order","value")]
+dat <- dcast(dat, Patient.ID+Taxonomy~sample_order)
+dat$diff2_1 <- dat$`2`-dat$`1`
+dat <- left_join(dat,unique(s.genus.dat[,c("Patient.ID","c2s","BE2")]), by="Patient.ID")
+
+#%>%filter(BE2=="NR")
+ggplot(dat%>%filter(Taxonomy!="other"), aes(x=c2s, y=abs(diff2_1), fill=c2s))+geom_boxplot()+stat_compare_means()+geom_point()+xlab("")+ylab("Relative abundance difference(sample2-sample1)")+theme_classic()
+
+ggplot(dat%>%filter(Taxonomy!="other"), aes(x=c2s, y=diff2_1, fill=c2s))+geom_boxplot()+stat_compare_means()+geom_point()+xlab("")+ylab("Relative abundance difference(sample2-sample1)")+theme_classic()+scale_y_log10()
+
+pgenus <- ggplot(dat%>%filter(Taxonomy!="other"), aes(x=Taxonomy, y=abs(diff2_1), fill=c2s))+geom_boxplot()+stat_compare_means(label="p.signif")+xlab("")+ylab("Relative abundance difference(sample2-sample1)")+theme_classic()+theme(axis.text.x = element_text(angle = 30, hjust = 1))
+pgenus
+
+ggplot(data = dat%>%filter(Taxonomy!="other"), mapping = aes(x = Patient.ID, y = diff2_1,fill=Taxonomy)) + geom_bar(stat = 'identity', position = 'dodge') + facet_grid(BE2~c2s, scales = 'free_x',space = "free")
+
+if(do.write){
+  ggsave(pgenus,width = 6, height = 5, filename = "../../Result/04.Globalview/4.composition/S77.genus.diff.diff_same.boxplot.pdf")
+}
+
+```
+由图可知，在丰度top10的genus中，更换疗法可能会导致Roseburia, Faecalibacterium, Bacteroides丰度变化；或者说更换疗法，Roseburia, Faecalibacterium, Bacteroides丰度响应较大
+
+
+### 两次取样样本之间：所有物种分析(不仅仅是top10)
+
+```{r}
+a.genus.dat <- genus.ab
+a.genus.dat$Taxonomy <- factor(rownames(a.genus.dat), levels = rownames(a.genus.dat))
+a.genus.dat <- melt(a.genus.dat, id = 'Taxonomy')
+names(a.genus.dat)[2] <-'sample'
+a.genus.dat <- merge(a.genus.dat, phe, by.x="sample", by.y="Fecal.sample.name")
+
+```
+
+#### 进行两次取样的所有样本所有菌
+```{r}
+s.a.genus.dat <- a.genus.dat%>%filter(sample_order=="1"|sample_order=="2")
+
+dat <- s.a.genus.dat[,c("Patient.ID","Taxonomy","sample_order","value")]
+dat <- dcast(dat, Patient.ID+Taxonomy~sample_order)
+dat$diff2_1 <- dat$`2`-dat$`1`
+dat <- left_join(dat,unique(s.genus.dat[,c("Patient.ID","c2s","BE2")]), by="Patient.ID")
+rem0genus <- unique(s.a.genus.dat[which(s.a.genus.dat$value>1),"Taxonomy"])
+
+#%>%filter(BE2=="NR")
+ggplot(dat%>%filter(Taxonomy%in%rem0genus), aes(x=c2s, y=abs(diff2_1), fill=c2s))+geom_boxplot()+stat_compare_means()+geom_point()+xlab("")+ylab("Relative abundance difference(sample2-sample1)")
+
+# log() y轴
+ggplot(dat%>%filter(Taxonomy%in%rem0genus), aes(x=c2s, y=diff2_1, fill=c2s))+geom_boxplot()+stat_compare_means()+geom_point()+xlab("")+ylab("Relative abundance difference(sample2-sample1)")+scale_y_log10()
+
+ggplot(dat%>%filter(Taxonomy%in%rem0genus), aes(x=Taxonomy, y=abs(diff2_1), fill=c2s))+geom_boxplot()+stat_compare_means(label="p.signif")+xlab("")+ylab("Relative abundance difference(sample2-sample1)")+theme_classic()+theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+```
+分析所有物种，发现具有差异的还是那三个主要的属
+
+## 比较ICT 和ICT+ 之间特定物种差异
+Top10
+```{r}
+# ICT.1 <- genus.dat[which(genus.dat$Group=="ICT"),"Patient.ID"]
+# ICT.1.genus.dat <- genus.dat%>%filter(Patient.ID%in%unique(ICT.1))
+# ICT.1.genus.dat$group <- "ICT"
+# ICT.1.genus.dat[which(ICT.1.genus.dat$Group!="ICT"),"group"] <- "ICT+"
+# 
+# ggplot(data = ICT.1.genus.dat%>%filter(c2s=="diff"&Taxonomy!="other"), aes(x=group, y=value)) + geom_boxplot(aes(fill=group))+ stat_compare_means(aes(group= group),method = "wilcox.test",size=4,label = "p.format",paired = T) + theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~Taxonomy)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray")+scale_y_log10()
+# pict.2 <- ggplot(data = ICT.1.genus.dat%>%filter(c2s=="diff"&Taxonomy!="other"), aes(x=Taxonomy, y=value,fill=group))+geom_boxplot(aes(fill=group))+stat_compare_means(aes(group= group),method = "wilcox.test",label="p.signif",paired = T)+xlab("")+ylab("Relative abundance")+theme_classic()+theme(axis.text.x = element_text(angle = 30, hjust = 1))
+# pict.2
+# if(do.write){
+#   ggsave(pict.2, filename = "../../Result/04.Globalview/4.composition/genus.top10.abundance.compare.boxplot.pdf")
+# }
+
+```
+
+7 samples
+```{r}
+ICT.1 <- phe[which(phe$Group=="ICT"&(phe$sample_order!="3"|phe$sample_order!="-")&phe$c2s=="diff"),"Patient.ID"]
+ICT.1.genus.dat <- s.genus.dat%>%filter(Patient.ID%in%unique(ICT.1))
+ICT.1.genus.dat$group <- "ICT"
+ICT.1.genus.dat[which(ICT.1.genus.dat$Group!="ICT"),"group"] <- "ICT+"
+
+# 配对秩和检验需要将样本顺序按照一样的排序排列才能进行配对
+ICT.1.genus.dat <- ICT.1.genus.dat[order(ICT.1.genus.dat$Patient.ID),] # 先按样本排序
+ICT.1.genus.dat <- ICT.1.genus.dat[order(ICT.1.genus.dat$group),] #再按照ICT ICT+组别排序
+ICT.1.genus.dat$sample <- factor(ICT.1.genus.dat$sample, levels = unique(ICT.1.genus.dat$sample)) # 设定因子
+# 画图
+ggplot(data = ICT.1.genus.dat%>%filter(Taxonomy!="other"), aes(x=group, y=value)) + geom_boxplot(aes(fill=group))+ stat_compare_means(aes(group= group),method = "wilcox.test",size=4,label = "p.format",paired = T) + theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~Taxonomy)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray")+scale_y_log10()
+pict.2 <- ggplot(data = ICT.1.genus.dat%>%filter(Taxonomy!="other"), aes(x=Taxonomy, y=value,fill=group))+geom_boxplot(aes(fill=group))+stat_compare_means(aes(group= group),method = "wilcox.test",label="p.signif",paired = T)+xlab("")+ylab("Relative abundance")+theme_classic()+theme(axis.text.x = element_text(angle = 30, hjust = 1))
+pict.2
+if(do.write){
+  ggsave(pict.2, width = 6, height = 4,filename = "../../Result/04.Globalview/4.composition/genus.top10.abundance.compare.ICT_ICT+.p7.boxplot.pdf")
+}
+```
+
+
+
+```{r}
+# 更换为ICT.TKI的样本
+# x <- s.genus.dat%>%filter(c2s=="diff"&Group=="ICT.TKI"&sample_order=="2")
+# ggplot(, aes(sample_order, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 90))+ scale_fill_manual("Top10 of Genus", values = color_heatmap_bule_red)+facet_grid(c2s~Patient.ID)
+
+```
+
+
+
+
+```{r}
+
+# sel.genus.ab <- select(genus.ab, dup.sta.p$Fecal.sample.name)
+# dat <- sel.genus.ab
+# dat$Taxonomy <- factor(rownames(dat), levels = rownames(dat))
+# dat <- melt(dat, id = 'Taxonomy')
+# names(dat)[2] <- 'sample'
+# 
+# dat <- dat%>%filter(dat$value > 1)
+# dat <- dat%>%filter(Taxonomy != "unknown")
+# 
+# dat <- merge(dat, dup.sta.p, by.x="sample", by.y="Fecal.sample.name")
+# #dat <- dat%>%filter(Taxonomy == "Akkermansia")
+# 
+# 
+# d <- dat#%>%filter(Patient.ID%in%s2$Patient.ID)
+# 
+# d <- d[order(d$sample_order),]
+# ggplot(d%>%filter(Treatment_type=="ICT"), aes(sample, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 40)) #+ facet_grid(~Treatment_type)
+# 
+# ggplot(d%>%filter(Treatment_type=="ICT/Chemo"), aes(sample, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 40)) #+ facet_grid(~Treatment_type)
+# 
+# ggplot(d%>%filter(Treatment_type=="ICT/Target"), aes(sample, value, fill = Taxonomy)) + geom_col(position = 'stack', width = 0.8) + theme(panel.grid = element_blank(), panel.background = element_rect(color = 'black', fill = 'transparent'), strip.text = element_text(size = 12), axis.text.x = element_text(size = 10, angle = 40)) #+ facet_grid(~Treatment_type)
+```

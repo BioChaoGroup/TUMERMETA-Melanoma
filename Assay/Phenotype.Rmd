@@ -1,0 +1,116 @@
+---
+title: "Organize phenotypic information"
+author: "pengzhuobing"
+date: "2021/4/28"
+update: "2021/7/1"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+1. 合并年龄性别表型
+```{r setup, include=FALSE}
+library(dplyr)
+do.write <- F
+
+# 合并年龄性别转移灶信息
+# phe<-read.table("../sampleInfo/sample information.txt",header = T, sep = "\t" )
+# age.gend <- read.csv("../sampleInfo/79_gender_age.txt", header = T,sep = "\t")
+# age.gend <- age.gend[!duplicated(age.gend),]
+# phe.210510 <- left_join(phe, age.gend, by=c("Hospital.ID"))
+# 
+# # 更新BE2信息
+# be2 <- read.table("../sampleInfo/BE2.txt",header = T, sep = "\t")
+# phe.210510 <- left_join(phe.210510, be2, by=c("Hospital.ID", "Sample.collection.time"))
+# phe.210510[is.na(phe.210510$BE2.y),25] <- phe.210510[is.na(phe.210510$BE2.y),20] # 其中两个样本没有BE2信息
+# colnames(phe.210510)[25] <- "BE2"
+# colnames(phe.210510)[20] <- "BE2.old"
+# 
+# # 更新BMI信息
+# BMIinf <- read.table("../sampleInfo/79_BMI.txt",header = T, sep = "\t")
+# phe.210616 <- left_join(phe.210510, BMIinf, by=c("Hospital.ID", "Sample.collection.time"))
+```
+
+
+```{r}
+
+if (do.write){
+  save(phe.210510,phe.210616, file = "../Result/01.Profile/phe.RData")
+}
+
+```
+
+
+```{r}
+# 合并年龄性别转移灶信息
+phe<-read.table("../sampleInfo/sample information.txt",header = T, sep = "\t" )
+age.gend <- read.csv("../sampleInfo/79_gender_age.txt", header = T,sep = "\t")
+age.gend <- age.gend[!duplicated(age.gend),]
+phe.210701 <- left_join(phe, age.gend, by=c("Hospital.ID"))
+
+# 更新BE2信息
+be2 <- read.table("../sampleInfo/BE2.txt",header = T, sep = "\t")
+phe.210701 <- left_join(phe.210701, be2, by=c("Hospital.ID", "Sample.collection.time"))
+phe.210701[is.na(phe.210701$BE2.y),which(colnames(phe.210701)=="BE2.y")] <- phe.210701[is.na(phe.210701$BE2.y),which(colnames(phe.210701)=="BE2.x")] # 其中两个样本没有BE2信息
+colnames(phe.210701)[which(colnames(phe.210701)=="BE2.y")] <- "BE2"
+colnames(phe.210701)[which(colnames(phe.210701)=="BE2.x")] <- "BE2.old"
+
+# 更新BMI信息
+BMIinf <- read.table("../sampleInfo/79_BMI.txt",header = T, sep = "\t")
+phe.210701 <- left_join(phe.210701, BMIinf, by=c("Hospital.ID", "Sample.collection.time"))
+```
+
+```{r}
+
+if (do.write){
+  save(phe.210701, file = "../Result/01.Profile/phe1.RData")
+}
+
+```
+
+
+# 排除性别年龄的影响
+
+# 研究两个两变量之间的关系，使用卡方检验
+
+```{r}
+library(ggplot2)
+library(ggsignif)
+library(ggpubr)
+library(psych)
+#load("../Result/01.Profile/relDaysgroups.RData")
+phe <- phe.210701#%>%filter(Fecal.sample.name%in%fecn.w50) # 剔除样本
+phe <- phe%>%filter(sample_order=="1"|sample_order=="-") # 剔除第二次采样样本
+
+# 年龄
+ggplot(phe%>%filter(BE2 != "NA"), aes(y=Age, x = BE2, fill=BE2)) + geom_boxplot() + stat_compare_means(label = "p.format",method = "wilcox.test",size=3) +theme_bw() # 秩和检验检测
+
+# 这里将年龄分为> 60 和 < 60 ,进行卡方检验chi-square test
+range(phe$Age)
+phe$age.60 <- ifelse(phe$Age<60, "<60", ">60")
+table(phe$age.60, phe$BE2)
+
+chisq.test(phe$age.60, phe$BE2)
+
+# 性别
+table(phe$BE2, phe$Gender)
+chisq.test(phe$Gender, phe$BE2)
+
+# 广东人群
+table(phe$Native.place)
+table(phe$Native.place,phe$BE2)
+chisq.test(phe$Native.place, phe$BE2)
+
+# 分组
+table(phe$Group)
+table(phe$Group,phe$BE2)
+chisq.test(phe$Group, phe$BE2)
+
+# BMI
+range(phe$BMI) # BMI>25为超重
+phe$BMI.25 <- ifelse(phe$BMI>25, ">25", "<25")
+table(phe$BMI.25,phe$BE2)
+chisq.test(phe$BMI.25,phe$BE2)
+
+```
+

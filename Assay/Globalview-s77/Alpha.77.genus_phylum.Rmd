@@ -1,0 +1,298 @@
+---
+title: "alpha-diversity (genus/phylum)"
+output:
+  html_notebook:
+    code_fold: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(vegan)
+library(ggplot2)
+library(ggpubr)
+library(ggsignif)
+library(dplyr)
+library(reshape2)
+library(patchwork)
+do.write<-F
+load("../../Result/04.Globalview/g2g.compare.RData")
+load("../../Result/01.Profile/relDaysgroups.RData")
+```
+
+# load data
+```{r}
+genus <- read.table("../../Result/01.Profile/genus.rela.abun.xls", sep = "\t", row.names = 1, header = T)
+phylum <- read.table("../../Result/01.Profile/phylum.rela.abun.xls", sep = "\t", row.names = 1, header = T)
+
+#phenotype
+#phe<-read.table("../../sampleInfo/sample information.txt",header = T, sep = "\t" )
+load("../../Result/01.Profile/phe1.RData")
+phe <- phe.210701#%>%filter(Fecal.sample.name%in%fecn.w50) # eliminate samples
+#phe <- phe%>%filter(sample_order=="1"|sample_order=="-")
+table(phe$Group, phe$sample_order)
+
+phe$Sample.collection.time <-  as.Date(phe$Sample.collection.time, format = "%Y/%m/%d")
+```
+
+
+# function
+```{r}
+# alpha diversity (shannon/richness/pielou)
+
+alpMethod <- function(selpro, m, group){
+  if (m=="shannon"){
+    index <- diversity(t(selpro), index = m, base = exp(1))
+  }else if(m=="richness"){
+    index <- rowSums(t(selpro) > 0)
+  }else if(m=="Pielou"){
+    index <- diversity(t(selpro),"shannon", base = exp(1)) /log(specnumber(t(selpro)))
+  }
+  return(index)
+}
+
+```
+
+
+```{r}
+rownames(phe) <- phe$Fecal.sample.name
+Shannon <- alpMethod(genus,"shannon",phe)
+Richness <- alpMethod(genus,"richness",phe)
+Pielou <- alpMethod(genus,"Pielou",phe)
+alpindex <- cbind(Shannon,Richness, Pielou)
+
+genus.alp <- merge(alpindex, phe, by = "row.names")    # merge table
+
+genus.alp$Treatment_type <- as.factor(genus.alp$Treatment_type)   
+genus.alp$Group <- as.factor(genus.alp$Group)
+genus.alp$Drug_type <- as.factor(genus.alp$Drug_type)
+
+f.genus.alp <- genus.alp%>%filter(sample_order=="1"|sample_order=="-")
+s.genus.alp <- genus.alp%>%filter(sample_order=="1"|sample_order=="2")
+
+```
+
+
+```{r}
+Shannon <- alpMethod(phylum,"shannon",phe)
+Richness <- alpMethod(phylum,"richness",phe)
+Pielou <- alpMethod(phylum,"Pielou",phe)
+alpindex <- cbind(Shannon,Richness, Pielou)
+
+phylum.alp <- merge(alpindex, phe, by = "row.names")    #merge table
+
+phylum.alp$Treatment_type <- as.factor(phylum.alp$Treatment_type)
+phylum.alp$Group <- as.factor(phylum.alp$Group)
+phylum.alp$Drug_type <- as.factor(phylum.alp$Drug_type)
+
+f.phylum.alp <- phylum.alp%>%filter(sample_order=="1"|sample_order=="-")
+s.phylum.alp <- phylum.alp%>%filter(sample_order=="1"|sample_order=="2")
+
+```
+
+
+only select <=50 week since ICT group's sampling time is too long
+```{r}
+
+pg50.1 <- ggplot(f.genus.alp%>%filter(Sampling.post.treatment.w.<=50), aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=Group))+stat_smooth(method=lm,aes(color=Group), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(n=45)") +
+ggplot(f.genus.alp%>%filter(Sampling.post.treatment.w.<=50), aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=Group))+stat_smooth(method=lm,aes(color=Group), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(n=45)")+plot_layout(nrow = 2)
+pg50.1
+
+if(do.write){
+  ggsave(pg50.1, width = 5, height = 7, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.genus.FS45.5g.point.smoothline.pdf")
+}
+```
+>* five group's richness increase with time
+
+
+5group + BE2 拟合曲线
+```{r}
+# ------------ genus ------------
+#因为alp多样性与取样时间有相关性，这里需要排除取样时间的影响，查看BE2的取样时间是不是分布均匀
+ggplot(data = f.genus.alp, aes(x=Sampling.post.treatment.w., y=Fecal.sample.name))+geom_point(aes(color=BE2))
+ggplot(data = f.genus.alp, aes(y=Sampling.post.treatment.w., x=BE2, fill=BE2))+geom_boxplot()+stat_compare_means()
+# 取样时间图可以看出R的取样时间中位数高于NR
+
+pg50.2 <- ggplot(f.genus.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment")+
+ggplot(f.genus.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment")+plot_layout(nrow = 2)
+
+pg50.2
+if(do.write){
+  ggsave(pg50.2, width = 5, height = 7, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.genus.all.FS50.R_NR.point.smoothline.pdf")
+}
+
+# NR 多样性高于R?，因为R和NR取样时间不一致，所以不能用boxplot来看两组之间的差异
+#ggplot(f.genus.alp,aes(x=BE2,y=Shannon,fill=BE2))+geom_boxplot()+stat_compare_means()+
+#ggplot(f.genus.alp,aes(x=BE2,y=Richness,fill=BE2))+geom_boxplot()+stat_compare_means()
+
+```
+>* genus水平：NR多样性增高的斜率大于R
+
+
+5group + BE2 箱线图
+```{r}
+#genus
+p50.3 <- ggplot(data = f.genus.alp, aes(x=Group, y=Shannon, fill=Group)) + geom_boxplot() + theme_classic() + labs(x='',title='')+ stat_compare_means(label = "p.format")+
+ggplot(data = f.genus.alp, aes(x=Group, y=Richness, fill=Group)) + geom_boxplot() + theme_classic() + labs(x='',title='')+ stat_compare_means(label = "p.format")+
+ggplot(data = f.genus.alp, aes(x=Group, y=Pielou, fill=Group)) + geom_boxplot() + theme_classic() + labs(x='',title='')+ stat_compare_means(label = "p.format")+plot_layout(nrow = 3)
+#,comparisons=compare_g5
+
+p50.3
+if(do.write){
+  ggsave(p50.3, width = 5, height = 7, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.genus.all.FS50.g5.compare.boxplot.pdf")
+}
+
+ggplot(data = f.genus.alp, aes(x=Group, y=Shannon)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')+
+ggplot(data = f.genus.alp, aes(x=Group, y=Richness)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')+
+ggplot(data = f.genus.alp, aes(x=Group, y=Pielou)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')
+
+# ICT
+p50.4.1 <- ggplot(data = f.genus.alp%>%filter(Group=="ICT"), aes(x=Group, y=Shannon)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')+
+ggplot(data = f.genus.alp%>%filter(Group=="ICT"), aes(x=Group, y=Richness)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')+
+ggplot(data = f.genus.alp%>%filter(Group=="ICT"), aes(x=Group, y=Pielou)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')+plot_layout(nrow = 3)
+
+p50.4 <- ggplot(f.genus.alp%>%filter(Group=="ICT"), aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(ICT,n=23;NR=12,R=11)")+
+ggplot(f.genus.alp%>%filter(Group=="ICT"), aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(ICT,n=23;NR=12,R=11)")+plot_layout(nrow = 2)
+
+p50.4
+
+if(do.write){
+  ggsave(p50.4, width = 5, height = 7, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.genus.FS.ICT.R_NR.point.smoothline.pdf")
+  ggsave(p50.4.1, width = 5, height = 7, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.genus.ICT.R_NR.compare.boxplot.pdf")
+}
+```
+**ICT组中R多样性高于NR**
+
+
+## 2. 进一步分析取了两个样本的受试者之间alpha多样性的差异
+
+```{r}
+s.genus.alp$c2s <- "same"
+s.genus.alp[s.genus.alp$Patient.ID%in%diff2sam,"c2s"] <- "diff"
+```
+由图可知，
+    第一次取样样本取样时间(主要在30w之前)显著低于第二次样本(主要在30w之后),可能是取样时间带来的影响
+    
+    在diff和same组中都是这样，但是相较于same组，diff组中第二个样本的取样时间更长一些
+    
+
+
+```{r}
+p50.5 <- ggplot(data = s.genus.alp, aes(x=sample_order, y=Shannon)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired = T) + theme_classic() + labs(x='',title='')+ geom_point() +geom_line(aes(group=Patient.ID), color="gray")+
+ggplot(data = s.genus.alp, aes(x=sample_order, y=Richness)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') + geom_point() +geom_line(aes(group=Patient.ID), color="gray") +
+ggplot(data = s.genus.alp, aes(x=sample_order, y=Shannon,fill=BE2)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')+
+ggplot(data = s.genus.alp, aes(x=sample_order, y=Richness,fill=BE2)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') 
+
+p50.5
+if(do.write){
+  ggsave(p50.5, width = 8, height = 6, filename = "../../Result/04.Globalview/1.Alpha/S52/genus.s1_s2.alpha_compare.shannon_richness.boxplot.pdf")
+}
+```
+第二次采样alp多样性升高
+
+
+```{r}
+p52.2 <- ggplot(s.genus.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(shape=Group,color=BE2))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(n=52)")+
+ggplot(s.genus.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(shape=Group,color=BE2))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(n=52)")+plot_layout(nrow = 2)
+
+p52.2
+
+if(do.write){
+  ggsave(p52.2, width = 6, height = 8, filename = "../../Result/04.Globalview/1.Alpha/S52/genus.s52.g5.point.shannon_richness.pdf")
+}
+
+ggplot(s.genus.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=c2s))+geom_line(aes(group=Patient.ID,color=c2s),linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(n=52)")+
+ggplot(s.genus.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=c2s))+geom_line(aes(group=Patient.ID,color=c2s),linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(n=52)")+plot_layout(nrow = 2)
+```
+
+
+
+```{r}
+p52.0 <- ggplot(data = s.genus.alp, aes(x=sample_order, y=Shannon)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray") +
+ggplot(data = s.genus.alp, aes(x=sample_order, y=Richness)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + theme_classic() + labs(x='',title='')  +geom_point() + theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray")+plot_layout(nrow = 2)
+
+p52.0
+if(do.write){
+  ggsave(p52.0, width=6, heigh=6,filename = "../../Result/04.Globalview/1.Alpha/S52/genus.diff_same.1_2.alpha_change.shannon_richness.boxplot.pdf")
+}
+```
+
+richness 在同一个病人两个样本之间互减
+```{r}
+dat <- s.genus.alp[,c("Patient.ID","sample_order","Richness")]
+dat <- dcast(dat, Patient.ID~sample_order)
+dat$richness2_1 <- dat$`2`-dat$`1`
+dat <- left_join(dat,unique(s.genus.alp[,c("Patient.ID","c2s","BE2")]), by="Patient.ID")
+
+prd <- ggplot(data = dat, aes(x=c2s, y=richness2_1,fill=c2s)) + geom_boxplot()+ stat_compare_means(aes(group= c2s),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='',y="Richness difference (sample2-sample1)") +geom_point()+ theme(axis.text.x = element_text())+ geom_point()
+
+prd
+
+if(do.write){
+  ggsave(prd, width = 4, height = 4, filename = "../../Result/04.Globalview/1.Alpha/S52/genus.diff.s2_s1.alpha_change.richness.boxplot.pdf")
+}
+```
+更换疗法的病人第二次样本alp多样性要比未更换疗法的病人第二次样本更高，或者说**diff组第一次样本和第二次样本多样性差异更大**。
+
+这可能是因为diff组第二次取样更长造成的>并无显著差异
+
+```{r}
+p52.1.genu <- ggplot(s.genus.alp%>%filter(Patient.ID%in%diff2sam), aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2,shape=Group))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(diff,n=18)")+
+ggplot(s.genus.alp%>%filter(Patient.ID%in%diff2sam), aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=BE2,shape=Group))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(diff,n=18)")+plot_layout(nrow = 2)
+
+p52.2.genu <- ggplot(s.genus.alp%>%filter(c2s=="same"), aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2,shape=Group))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(same,n=34)")+
+ggplot(s.genus.alp%>%filter(c2s=="same"), aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=BE2,shape=Group))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(same,n=34)")+plot_layout(nrow = 2)
+
+if(do.write){
+  ggsave(p52.1.genu, width=6, heigh=6,filename = "../../Result/04.Globalview/1.Alpha/S52/genus.diff.alpha_change.shannon_richness.point.pdf")
+  ggsave(p52.2.genu, width=6, heigh=6,filename = "../../Result/04.Globalview/1.Alpha/S52/genus.same.alpha_change.shannon_richness.point.pdf")
+}
+```
+
+
+## 3. 其他分析
+10group + 2group boxplot
+`
+
+# 4.ICT  ICT+ 比较分析
+
+```{r}
+ICT.1 <- s.genus.alp[which(s.genus.alp$Group=="ICT"),"Patient.ID"]
+
+ICT.1.s.genus.alp <- s.genus.alp%>%filter(Patient.ID%in%ICT.1)
+ICT.1.s.genus.alp$group <- "ICT"
+ICT.1.s.genus.alp[which(ICT.1.s.genus.alp$Group!="ICT"),"group"] <- "ICT+"
+
+p_ict <- ggplot(data = ICT.1.s.genus.alp%>%filter(c2s=="diff"), aes(x=group, y=Shannon)) + geom_boxplot(aes(fill=group))+ stat_compare_means(aes(group= group),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray") + ylab("Shannon diversity index") +
+ggplot(data = ICT.1.s.genus.alp%>%filter(c2s=="same"), aes(x=sample_order, y=Shannon)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray")+xlab("ICT")+  ylab("Shannon diversity index") +
+ggplot(data = ICT.1.s.genus.alp%>%filter(c2s=="diff"), aes(x=group, y=Richness)) + geom_boxplot(aes(fill=group))+ stat_compare_means(aes(group= group),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + theme_classic() + labs(x='',title='')  +geom_point() + theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray")+ ylab("Genus number") +
+ggplot(data = ICT.1.s.genus.alp%>%filter(c2s=="same"), aes(x=sample_order, y=Richness)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray")+xlab("ICT")+ ylab("Genus number")
+p_ict
+if(do.write){
+  ggsave(p_ict, width=6, heigh=6,filename = "../../Result/04.Globalview/1.Alpha/S52/genus.diff.alpha_ICT_ICT+.shannon_richness.pair.wilcox.boxplot.pdf")
+}
+```
+
+
+# 5.特定样本分析
+
+```{r}
+p14.genus.alp <- genus.alp%>%filter(Patient.ID=="P-014")
+p_014.genus <- ggplot(p14.genus.alp, aes(x=sample_order, y=Shannon)) + geom_point(aes(color=Group)) + geom_line(aes(group=Patient.ID), color="gray")+theme_bw()+xlab("genus(P-014)")+
+ggplot(p14.genus.alp, aes(x=sample_order, y=Richness)) + geom_point(aes(color=Group)) + geom_line(aes(group=Patient.ID), color="gray")+theme_bw()+xlab("genus(P-014)")
+
+p_014.genus
+
+if(do.write){
+  ggsave(p_014.genus, width=6, heigh=3,filename = "../../Result/04.Globalview/1.Alpha/S52/genus.P_014.shannon_richness.point.pdf")
+}
+
+```
+p-014样本进行三次取样，在genus水平三次取样趋势是先升后降
+
+
+# Fin
+
+
+
+
+

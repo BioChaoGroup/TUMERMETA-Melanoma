@@ -1,0 +1,456 @@
+---
+title: "alpha-diversity"
+output:
+  html_notebook:
+    code_fold: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(vegan)
+library(ggplot2)
+library(ggpubr)
+library(ggsignif)
+library(dplyr)
+library(reshape2)
+library(patchwork)
+library(plyr)
+source("../common.R")
+source("../TEST.functions.R")
+do.write<-F
+```
+
+```{r}
+#计算alpha多样性
+alpMethod <- function(selpro, m, group){
+  if (m=="shannon"){
+    index <- diversity(t(selpro), index = m, base = exp(1))
+  }else if(m=="richness"){
+    index <- rowSums(t(selpro) > 0)
+  }else if(m=="Pielou"){
+    index <- diversity(t(selpro),"shannon", base = exp(1)) /log(specnumber(t(selpro)))
+  }
+  return(index)
+}
+
+```
+
+
+# mgs
+```{r}
+mgs <- read.table("../../Result/02.gene2MGS/IGC.mgs.79.abundance.profile.txt", sep = "\t", row.names = 1, header = T)
+mgs <- mgs[rowSums(mgs)!=0,]
+# trans to relative aboundance
+mgs <- mgs/1000000  # total gene aboundance is 1000000
+
+#phenotype
+load("../../Result/01.Profile/phe1.RData")
+load("../../Result/01.Profile/relDaysgroups.RData")
+```
+
+
+```{r}
+#phe <- phe.210616 #%>%filter(Fecal.sample.name%in%fecn.w50) # 不剔除样本
+phe <- phe.210701
+phe$Sample.collection.time <-  as.Date(phe$Sample.collection.time, format = "%Y/%m/%d")
+#phe <- phe%>%filter(Antibiotic.use == "No")
+```
+
+
+```{r}
+if(file.exists("../../Result/04.Globalview/g2g.compare.RData")){
+  load("../../Result/04.Globalview/g2g.compare.RData")
+}else{
+  g2g3 <- combn(levels(droplevels(phe$Treatment_type)),2)
+  compare_g3 <- list(g2g3[,1],g2g3[,2],g2g3[,3])
+  g2g5 <- combn(levels(droplevels(phe$Group)),2)
+  compare_g5 <- list(g2g5[,1],g2g5[,2],g2g5[,3],g2g5[,4],g2g5[,5],g2g5[,6],g2g5[,7],g2g5[,8],g2g5[,9],g2g5[,10])
+  g2g10 <- combn(levels(droplevels(phe$Drug_type)),2)
+  compare_g10 <- list(g2g10[,1],g2g10[,2],g2g10[,3],g2g10[,4],g2g10[,5],g2g10[,6],g2g10[,7],g2g10[,8],g2g10[,9],g2g10[,10],g2g10[,11],g2g10[,12],g2g10[,13],g2g10[,14],g2g10[,15])
+  save(compare_g3,compare_g5, compare_g10, file = "../../Result/04.Globalview/g2g.compare.RData")
+}
+
+```
+
+
+```{r}
+rownames(phe) <- phe$Fecal.sample.name
+
+Shannon <- alpMethod(mgs,"shannon",phe)
+Richness <- alpMethod(mgs,"richness",phe)
+Pielou <- alpMethod(mgs,"Pielou",phe)
+alpindex <- cbind(Shannon,Richness, Pielou)
+
+mgs.alp <- merge(alpindex, phe, by = "row.names")    #合并表格
+
+mgs.alp$Treatment_type <- as.factor(mgs.alp$Treatment_type)   #设定因子水平
+mgs.alp$Group <- as.factor(mgs.alp$Group)
+mgs.alp$Drug_type <- as.factor(mgs.alp$Drug_type)
+#save(mgs.alp,file="../Result/04.Globalview/1.Alpha/bmc.sum.BE3.Alp.RData")
+
+f.mgs.alp <- mgs.alp%>%filter(sample_order=="1"|sample_order=="-")
+s.mgs.alp <- mgs.alp%>%filter(sample_order=="1"|sample_order=="2")
+```
+
+
+# 分析1：广东人/非广东人差异, --------------------------waiting for update-----------筛选同等条件的广东人非广东人进行比较
+```{r}
+table(f.mgs.alp$BE2, f.mgs.alp$Native.place)
+
+ggplot(data = f.mgs.alp, aes(x=BE2, y=Sampling.post.treatment.w., fill=Native.place)) + geom_boxplot()+ stat_compare_means(label = "p.format") + theme_classic() + labs(x='',title='')
+
+```
+
+
+```{r}
+# 1. 箱线图
+ggplot(data = f.mgs.alp, aes(x=Native.place, y=Shannon, fill=Native.place)) + geom_boxplot()+ stat_compare_means(label = "p.format") + theme_classic() + labs(x='',title='')+
+ggplot(data = f.mgs.alp, aes(x=Native.place, y=Richness, fill=Native.place)) + geom_boxplot()+ stat_compare_means(label = "p.format") + theme_classic() + labs(x='',title='')
+
+# 2. 拟合曲线
+ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=Native.place,shape=BE2))+stat_smooth(method=lm,aes(color=Native.place), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment")
+
+# 3. BE2 in Native.place
+ggplot(data = f.mgs.alp, aes(x=Native.place, y=Shannon, fill=BE2)) + geom_boxplot()+ stat_compare_means(label = "p.format") + theme_classic() + labs(x='',title='')+
+ggplot(data = f.mgs.alp, aes(x=Native.place, y=Richness, fill=BE2)) + geom_boxplot()+ stat_compare_means(label = "p.format") + theme_classic() + labs(x='',title='')
+
+# 4. 拟合曲线
+ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment") + facet_wrap(Native.place~.)
+```
+可知广东人alp多样性高于非广东人，并随治疗时间逐渐升高
+
+# 分析2：查看mgs多样性是否会随着取样时间变化
+```{r}
+
+# 1. R：NR拟合曲线
+p57.1 <- ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(n=50)")+
+ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(n=50)")+plot_layout(nrow=2)
+p57.1
+
+if(do.write){
+  ggsave(p57.1, width = 5, height = 6, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.mgs.all.FS50.R_NR.point.smoothline.pdf")
+}
+
+# 2. R:NR 箱线图
+# 亚组之间两两比较
+ggplot(data = f.mgs.alp, aes(x=BE2, y=Shannon)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') +
+ggplot(data = f.mgs.alp, aes(x=BE2, y=Richness)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') +plot_layout(ncol=1)
+#+ggplot(data = f.mgs.alp, aes(x=BE2, y=Pielou)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')
+
+```
+
+```{r}
+x <- aov(Shannon~BE2, data = f.mgs.alp)
+summary(x)
+fit <- aov(Shannon~BE2+Sampling.post.treatment.w., data = f.mgs.alp)
+summary(fit)
+
+```
+
+
+```{r}
+ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2))+stat_smooth(method=lm, alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment")+
+ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=BE2))+stat_smooth(method=lm, alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment")
+
+# 1. 五组拟合曲线,>50w全都是ICT,图不好看，这里筛选<=50w的样本,共45个
+dim(f.mgs.alp[which(f.mgs.alp$Sampling.post.treatment.w.<=50),])[1]
+
+p57.2 <- ggplot(f.mgs.alp%>%filter(Sampling.post.treatment.w.<=50), aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=Group))+stat_smooth(method=lm,aes(color=Group), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(n=45)")+
+ggplot(f.mgs.alp%>%filter(Sampling.post.treatment.w.<=50), aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=Group))+stat_smooth(method=lm,aes(color=Group), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(n=45)")+plot_layout(nrow=2)
+p57.2
+
+if(do.write){
+  ggsave(p57.2, width = 6, height = 6, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.mgs.FS45.5g.point.smoothline.pdf")
+}
+
+# 2. 五组分别画拟合曲线，除了ICT组其他组样本太少没有意义
+ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=Group))+stat_smooth(method=lm,aes(color=Group), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment") + facet_grid(~Group)
+ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=Group))+stat_smooth(method=lm,aes(color=Group), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment") + facet_grid(~Group)
+
+ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment") + facet_grid(~Group)
+ggplot(f.mgs.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment") + facet_grid(~Group)
+
+# 3. ICT组R:NR的拟合曲线
+ict.f.mgs.alp <- f.mgs.alp%>%filter(Group=="ICT")
+dim(ict.f.mgs.alp)[1]
+table(ict.f.mgs.alp$BE2)
+
+p57.3 <- ggplot(f.mgs.alp%>%filter(Group=="ICT"), aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(ICT n=23;NR=12,R=11)")+
+ggplot(f.mgs.alp%>%filter(Group=="ICT"), aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=BE2))+stat_smooth(method=lm,aes(color=BE2), alpha = 0.2)+theme_bw()+xlab("Weeks relative to initiation of treatment(ICT n=23;NR=12,R=11)") +plot_layout(nrow=2)
+p57.3
+
+if(do.write){
+  ggsave(p57.3, width = 5, height = 6, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.mgs.FS.ICT.R_NR.point.smoothline.pdf")
+}
+```
+
+5group
+```{r}
+p57.4 <- ggplot(data = f.mgs.alp, aes(x=Group, y=Richness, fill=Group)) + theme_classic() + labs(x='',title='') + geom_boxplot()+ stat_compare_means(label = "p.format") +theme(axis.text.x = element_text(hjust=1,angle = 30))+
+ggplot(data = f.mgs.alp, aes(x=Group, y=Shannon, fill=Group)) + geom_boxplot()+ theme_classic() + labs(x='',title='') + stat_compare_means(label = "p.format") +theme(axis.text.x = element_text(hjust=1,angle = 30))+
+ggplot(data = f.mgs.alp, aes(x=Group, y=Pielou, fill=Group)) + geom_boxplot() + theme_classic() + labs(x='',title='') + stat_compare_means(label = "p.format") +theme(axis.text.x = element_text(hjust=1,angle = 30))+ plot_layout(nrow = 3)
+#,comparisons=compare_g5 
+p57.4
+
+if(do.write){
+  ggsave(p57.4, width = 5, height = 8, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.mgs.all.FS50.g5.compare.boxplot.pdf")
+}
+
+# 除了ICT组，其他组样本太少没有意义
+ggplot(data = f.mgs.alp, aes(x=Group, y=Shannon)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') +
+ggplot(data = f.mgs.alp, aes(x=Group, y=Richness)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') +
+ggplot(data = f.mgs.alp, aes(x=Group, y=Pielou)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')
+#label = "p.signif"
+
+# ICT组
+
+p57.5 <- ggplot(data = f.mgs.alp%>%filter(Group=="ICT"), aes(x=Group, y=Shannon)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') +
+ggplot(data = f.mgs.alp%>%filter(Group=="ICT"), aes(x=Group, y=Richness)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') +
+ggplot(data = f.mgs.alp%>%filter(Group=="ICT"), aes(x=Group, y=Pielou)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')+ plot_layout(nrow = 3)
+p57.5
+
+if(do.write){
+  ggsave(p57.5, width = 4, height = 6, filename = "../../Result/04.Globalview/1.Alpha/FS50/bmc.mgs.ICT.R_NR.compare.boxplot.pdf")
+}
+```
+** 由图可知ICT的R多样性高于NR，ICT.TMZ的NR多样性高于R
+
+
+# 分析3：查看受试者取样前后差异
+
+```{r}
+dim(s.mgs.alp)[1]
+table(s.mgs.alp$BE2,s.mgs.alp$sample_order)
+
+# 1. 箱线图
+p52.1 <- ggplot(data = s.mgs.alp, aes(x=sample_order, y=Shannon, fill=sample_order)) + geom_boxplot()+ stat_compare_means(label = "p.format",method = "wilcox.test",paired=TRUE) + theme_classic() + labs(x='',title='')+geom_point()+geom_line(aes(group=Patient.ID),color="gray")+
+ggplot(data = s.mgs.alp, aes(x=sample_order, y=Richness, fill=sample_order)) + geom_boxplot()+ stat_compare_means(label = "p.format",method = "wilcox.test",paired=TRUE) + theme_classic() + labs(x='',title='')+geom_point()+geom_line(aes(group=Patient.ID),color="gray")+
+ggplot(data = s.mgs.alp, aes(x=sample_order, y=Shannon, fill=BE2)) + geom_boxplot()+ stat_compare_means(label = "p.format") + theme_classic() + labs(x='',title='')+
+ggplot(data = s.mgs.alp, aes(x=sample_order, y=Richness, fill=BE2)) + geom_boxplot()+ stat_compare_means(label = "p.format") + theme_classic() + labs(x='',title='')
+p52.1
+
+if(do.write){
+  ggsave(p52.1, width = 8, height = 8, filename = "../../Result/04.Globalview/1.Alpha/S52/mgs.s1_s2.alpha_compare.shannon_richness.boxplot.pdf")
+}
+```
+第二次取样多样性高于第一次
+
+```{r}
+ggplot(s.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=sample_order))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment")+
+ggplot(s.mgs.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=sample_order))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment")
+
+ggplot(s.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(color=BE2))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment")+
+ggplot(s.mgs.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(color=BE2))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment")
+
+p52.2 <- ggplot(s.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) + geom_point(aes(shape=Group,color=BE2))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(n=52)")+
+ggplot(s.mgs.alp, aes(x=Sampling.post.treatment.w., y=Richness)) + geom_point(aes(shape=Group,color=BE2))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(n=52)")+plot_layout(nrow = 2)
+p52.2
+
+if(do.write){
+  ggsave(p52.2, width = 7, height = 8, filename = "../../Result/04.Globalview/1.Alpha/S52/mgs.s52.g5.point.shannon_richness.pdf")
+}
+```
+
+** 大部分病人第二次alp多样性都升高
+** 部分alp（shannon）降低的病人是2个更换疗法组的(ICT->ICT.BRAF; ICT->ICT.TKI)，2个ICT和2个ICT.TMZ组
+
+
+```{r}
+s.mgs.alp$c2s <- "same"
+s.mgs.alp[s.mgs.alp$Patient.ID%in%diff2sam,"c2s"] <- "diff"
+ggplot(s.mgs.alp, aes(x=Sampling.post.treatment.w., y=Shannon)) +geom_point(aes(color=Group))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment")+facet_wrap(Group~.)
+
+# 更换疗法
+length(diff2sam)*2
+p52.3 <- ggplot(s.mgs.alp%>%filter(Patient.ID%in%diff2sam), aes(x=Sampling.post.treatment.w., y=Shannon)) +geom_point(aes(color=BE2,shape=Group))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(diff,n=18)")+
+ggplot(s.mgs.alp%>%filter(Patient.ID%in%diff2sam), aes(x=Sampling.post.treatment.w., y=Richness)) +geom_point(aes(color=BE2,shape=Group))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(diff,n=18)")+plot_layout(nrow = 2)
+p52.3
+
+# 未更换疗法
+p52.4<- ggplot(s.mgs.alp%>%filter(c2s=="same"), aes(x=Sampling.post.treatment.w., y=Shannon)) +geom_point(aes(color=BE2,shape=Group))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(same,n=34)")+
+ggplot(s.mgs.alp%>%filter(c2s=="same"), aes(x=Sampling.post.treatment.w., y=Richness)) +geom_point(aes(color=BE2,shape=Group))+geom_line(aes(group=Patient.ID),color="gray",linetype="dashed")+theme_bw()+xlab("Weeks relative to initiation of treatment(same,n=34)")+plot_layout(nrow = 2)
+p52.4
+
+if(do.write){
+  ggsave(p52.3, width=6, heigh=6,filename = "../../Result/04.Globalview/1.Alpha/S52/mgs.diff.alpha_change.shannon_richness.point.pdf")
+  ggsave(p52.4, width=6, heigh=6,filename = "../../Result/04.Globalview/1.Alpha/S52/mgs.same.alpha_change.shannon_richness.point.pdf")
+}
+```
+仅有两个ICT转其他疗法，这两个病人多样性就减少了
+```{r}
+
+
+p52.5 <- ggplot(data = s.mgs.alp, aes(x=sample_order, y=Shannon)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray") +
+ggplot(data = s.mgs.alp, aes(x=sample_order, y=Richness)) + geom_boxplot(aes(fill=sample_order))+ stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE) + theme_classic() + labs(x='',title='')  +geom_point() + theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +geom_line(aes(group=Patient.ID), color="gray")+plot_layout(nrow = 2)
+
+p52.5
+
+if(do.write){
+  ggsave(p52.5, width=6, heigh=6,filename = "../../Result/04.Globalview/1.Alpha/S52/mgs.diff_same.1_2.alpha_change.shannon_richness.boxplot.pdf")
+}
+
+```
+richness 在同一个病人两个样本之间互减
+```{r}
+dat <- s.mgs.alp[,c("Patient.ID","sample_order","Richness")]
+dat <- dcast(dat, Patient.ID~sample_order)
+dat$richness2_1 <- dat$`2`-dat$`1`
+dat <- left_join(dat,unique(s.mgs.alp[,c("Patient.ID","c2s","BE2")]), by="Patient.ID")
+
+prd <- ggplot(data = dat, aes(x=c2s, y=richness2_1,fill=c2s)) + geom_boxplot()+ stat_compare_means(aes(group= c2s),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='',y="Richness difference (sample2-sample1)") +geom_point()+ theme(axis.text.x = element_text())+ geom_point()
+
+if(do.write){
+  ggsave(prd, width = 5, height = 4, filename = "../../Result/04.Globalview/1.Alpha/S52/mgs.diff.s2_s1.alpha_change.richness.boxplot.pdf")
+}
+```
+diff两样本间alp多样性差异大于same组两样本间alp多样性差异
+
+richness在更换疗法的两个病人之间差值显著高于未更换疗法之间的两个病人
+
+
+# 其他分析
+
+3group
+```{r}
+
+# 大组之间两两比较
+
+ggplot(data = f.mgs.alp, aes(x=Treatment_type, y=Richness, fill=Treatment_type)) + geom_boxplot()+ stat_compare_means(label = "p.format",comparisons=compare_g3) + theme_classic() + labs(x='',title='') +
+ggplot(data = f.mgs.alp, aes(x=Treatment_type, y=Shannon, fill=Treatment_type)) + geom_boxplot()+ stat_compare_means(label = "p.format",comparisons=compare_g3) + theme_classic() + labs(x='',title='') +
+ggplot(data = f.mgs.alp, aes(x=Treatment_type, y=Pielou, fill=Treatment_type)) + geom_boxplot()+ stat_compare_means(label = "p.format",comparisons=compare_g3) + theme_classic() + labs(x='',title='')
+```
+
+
+10group
+```{r}
+ggplot(data = f.mgs.alp, aes(x=Drug_type, y=Richness,fill=Drug_type)) + geom_boxplot()+ stat_compare_means(label = "p.format",comparisons = compare_g10) + theme_classic() + labs(x='',title='') + theme(axis.text.x = element_text(angle = 15)) +
+ggplot(data = f.mgs.alp, aes(x=Drug_type, y=Shannon,fill=Drug_type)) + geom_boxplot()+ stat_compare_means(label = "p.format",comparisons = compare_g10) + theme_classic() + labs(x='',title='') + theme(axis.text.x = element_text(angle = 15)) +
+ggplot(data = f.mgs.alp, aes(x=Drug_type, y=Pielou,fill=Drug_type)) + geom_boxplot()+ stat_compare_means(label = "p.format",comparisons = compare_g10) + theme_classic() + labs(x='',title='') + theme(axis.text.x = element_text(angle = 15))
+
+
+```
+BE3
+```{r}
+my_comparisons <- list(c("PD","PR"),c("PD","SD"),c("PR","SD"))
+ggplot(data = mgs.alp, aes(x=BE3, y=Shannon)) + geom_boxplot(aes(fill=BE3))+stat_compare_means(comparisons=my_comparisons,label = "p.format",method = "wilcox.test",size=3) + theme_classic() + labs(x='',title='') +
+ggplot(data = mgs.alp, aes(x=BE3, y=Richness)) + geom_boxplot(aes(fill=BE3))+ theme_classic() + labs(x='',title='')+stat_compare_means(comparisons=my_comparisons,label = "p.format",method = "wilcox.test",size=3)  +
+ggplot(data = mgs.alp, aes(x=BE3, y=Pielou)) + geom_boxplot(aes(fill=BE3))+stat_compare_means(comparisons=my_comparisons,label = "p.format",method = "wilcox.test",size=3) + theme_classic() + labs(x='',title='')
+
+
+ggplot(data = mgs.alp, aes(x=Treatment_type, y=Shannon)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') + 
+ggplot(data = mgs.alp, aes(x=Treatment_type, y=Richness)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') +
+ggplot(data = mgs.alp, aes(x=Treatment_type, y=Pielou)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='')
+#label = "p.format"
+
+ggplot(data = mgs.alp, aes(x=Drug_type, y=Shannon)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') + theme(axis.text.x = element_text(angle = 15))+
+ggplot(data = mgs.alp, aes(x=Drug_type, y=Richness)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') + theme(axis.text.x = element_text(angle = 15))+
+ggplot(data = mgs.alp, aes(x=Drug_type, y=Pielou)) + geom_boxplot(aes(fill=BE2))+ stat_compare_means(aes(group= BE2),method = "wilcox.test",size=4,label = "p.format") + theme_classic() + labs(x='',title='') + theme(axis.text.x = element_text(angle = 15))
+#label = "p.signif"
+
+
+```
+
+# 4. ICT  ICT+ 比较分析
+
+```{r}
+ICT.1 <- s.mgs.alp[which(s.mgs.alp$Group=="ICT"),"Patient.ID"]
+
+ICT.1.s.mgs.alp <- s.mgs.alp%>%filter(Patient.ID%in%ICT.1)
+ICT.1.s.mgs.alp$group <- "ICT"
+ICT.1.s.mgs.alp[which(ICT.1.s.mgs.alp$Group!="ICT"),"group"] <- "ICT+"
+
+# 使用秩和检验的配对检验
+p_ict <- ggplot(data = ICT.1.s.mgs.alp%>%filter(c2s=="diff"), aes(x=group, y=Shannon)) +
+  geom_boxplot(aes(fill=group))+ 
+  stat_compare_means(aes(group= group),method = "wilcox.test",size=4,label = "p.format",paired=TRUE, alternative = "two.sided") + 
+  theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+
+  facet_wrap(~c2s)+ geom_point() +
+  geom_line(aes(group=Patient.ID), color="gray") + ylab("Shannon diversity index") +
+ggplot(data = ICT.1.s.mgs.alp%>%filter(c2s=="diff"), aes(x=group, y=Richness)) + 
+  geom_boxplot(aes(fill=group))+ stat_compare_means(aes(group= group),method = "wilcox.test",size=4,label = "p.format",paired=TRUE, alternative = "two.sided") +
+  theme_classic() + labs(x='',title='')  +geom_point() + 
+  theme(axis.text.x = element_text())+facet_wrap(~c2s)+ 
+  geom_point() +geom_line(aes(group=Patient.ID), color="gray") + ylab("MGS number") +
+ggplot(data = ICT.1.s.mgs.alp%>%filter(c2s=="same"), aes(x=sample_order, y=Shannon)) + 
+  geom_boxplot(aes(fill=sample_order))+ 
+  stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE, alternative = "two.sided") + 
+  theme_classic() + labs(x='',title='') +geom_point()+ theme(axis.text.x = element_text())+facet_wrap(~c2s)+ 
+  geom_point() +geom_line(aes(group=Patient.ID), color="gray")+xlab("ICT")+ ylab("Shannon diversity index") +
+ggplot(data = ICT.1.s.mgs.alp%>%filter(c2s=="same"), aes(x=sample_order, y=Richness)) +
+  geom_boxplot(aes(fill=sample_order))+ 
+  stat_compare_means(aes(group= sample_order),method = "wilcox.test",size=4,label = "p.format",paired=TRUE, alternative = "two.sided") + 
+  theme_classic() + labs(x='',title='') +geom_point()+ 
+  theme(axis.text.x = element_text())+facet_wrap(~c2s)+ geom_point() +
+  geom_line(aes(group=Patient.ID), color="gray")+xlab("ICT") + ylab("MGS number")
+
+p_ict
+if(do.write){
+  ggsave(p_ict, width=8, heigh=8,filename = "../../Result/04.Globalview/1.Alpha/S52/mgs.diff.alpha_ICT_ICT+.shannon_richness.pair.wilcox.boxplot.pdf")
+}
+```
+
+ano检验，排除取样时间因素
+```{r}
+x <- aov(Shannon~BE2, data = f.mgs.alp)
+summary(x)
+fit <- aov(Shannon~group+Sampling.post.treatment.w., data = ICT.1.s.mgs.alp%>%filter(c2s=="diff"))
+summary(fit)
+```
+
+查看ICT和ICT+共有的MGS/独有的MGS
+```{r}
+ict.mgs <- mgs[,ICT.1.s.mgs.alp$Row.names]
+ict.mgs$Taxonomy <- factor(rownames(ict.mgs), levels = rownames(ict.mgs))
+ict.mgs <- melt(ict.mgs, id = 'Taxonomy')
+names(ict.mgs)[2] <-'sample'
+ict.mgs <- merge(ict.mgs, phe, by.x="sample", by.y="Fecal.sample.name")
+```
+
+
+# 5.特定样本P-014三次取样分析
+
+```{r}
+p14.mgs.alp <- mgs.alp%>%filter(Patient.ID=="P-014")
+
+p_014.mgs <- ggplot(p14.mgs.alp, aes(x=sample_order, y=Shannon)) + geom_point(aes(color=Group)) + geom_line(aes(group=Patient.ID), color="gray")+xlab("mgs(P-014)")+theme_bw()+
+ggplot(p14.mgs.alp, aes(x=sample_order, y=Richness)) + geom_point(aes(color=Group)) + geom_line(aes(group=Patient.ID), color="gray")+xlab("mgs(P-014)")+theme_bw()
+
+p_014.mgs
+if(do.write){
+  ggsave(p_014.mgs, width=6, heigh=3,filename = "../../Result/04.Globalview/1.Alpha/S52/mgs.P_014.shannon_richness.boxplot.pdf")
+}
+```
+p-014样本进行三次取样，在mgs水平三次取样趋势是先升后?
+
+
+# 表格
+```{r}
+R <- mgs.alp%>%filter(BE2=="R")
+NR <- mgs.alp%>%filter(BE2=="NR")
+median(R$Shannon)
+median(NR$Shannon)
+median(R$Richness)
+median(NR$Richness)
+
+for (i in levels(phe$Treatment_type)){
+  a <- R%>%filter(Treatment_type==i)
+  b <- NR%>%filter(Treatment_type==i)
+  print(i)
+  print(median(a$Shannon))
+  print(median(b$Shannon))
+  print(median(a$Richness))
+  print(median(b$Richness))
+}
+
+for (i in levels(phe$Group)){
+  a <- R%>%filter(Group==i)
+  b <- NR%>%filter(Group==i)
+  print(i)
+  print( median(a$Shannon))
+  print(median(b$Shannon))
+  print(median(a$Richness))
+  print(median(b$Richness))
+}
+
+```
+
